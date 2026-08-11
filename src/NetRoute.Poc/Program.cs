@@ -18,9 +18,12 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
-        if (args.FirstOrDefault() is "wfp")
+        switch (args.FirstOrDefault())
         {
-            return await WfpProof.RunAsync();
+            case "wfp":
+                return await WfpProof.RunAsync();
+            case "apps":
+                return await AppDiscoveryProof.RunAsync();
         }
 
         var discovery = new AdapterDiscovery();

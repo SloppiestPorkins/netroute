@@ -60,6 +60,23 @@ from Ethernet, so the proof holds, but it is a useful reminder that the TCP prob
 alone is not a trustworthy verification signal on every network. Verification
 should prefer the UDP path and treat RFC 6598 space as "proxied, inconclusive".
 
+## What was proven: WFP enforcement
+
+`netroute-poc wfp`, run elevated. Pins `curl.exe` to Gaming (Ethernet), then runs
+curl bound to each adapter in turn. A working baseline is taken first so a later
+failure can be attributed to enforcement rather than to the network.
+
+```
+Baseline          Ethernet OK (84.67.213.242)   Wi-Fi OK (82.132.184.210)
+12 filters installed across 1 rule
+Enforced          Ethernet OK (84.67.213.242)   Wi-Fi BLOCKED
+After teardown    Wi-Fi OK (82.132.184.210)
+```
+
+Per-application, per-interface enforcement works, and removing the filters restores
+normal networking. Strict mode, the kill switch and leak prevention rest on this and
+are therefore real today.
+
 ## Verification design note (§24)
 
 The probe measures *observed* egress. A WFP filter existing is only *configured*.
@@ -77,6 +94,52 @@ IPv4-only adapters rather than leaving it to routing, and the UI has to surface
 that the role is IPv4-only.
 
 `AdapterDiscovery` already detects this and the POC reports it.
+
+## Application discovery findings
+
+Measured against the development machine (18 Xbox titles, 5 launchers, ~150 desktop apps).
+
+### Game Pass detection must not be inferred
+
+The first implementation guessed, by looking for an `XboxGames` path or a Gaming
+Services package dependency. It found **zero** of the 17 installed titles, and did so
+silently. Neither signal works: the packages live under `WindowsApps` like any other
+Store app, their content sits in a separate `XboxGames` tree, and they declare no
+Gaming Services dependency.
+
+The authoritative source is
+`HKLM\SOFTWARE\Microsoft\GamingServices\PackageRepository\Root`, where Xbox records
+the package full name of everything it installed. Reading it is unprivileged and
+survives title updates. Converting those full names to family names is covered by
+tests, because getting it wrong reproduces the original silent zero-match failure.
+
+DLC, skin packs and art collections also appear in that repository. They are excluded
+by requiring a launchable application entry — they have no AUMID, so there is no
+process and nothing to route.
+
+### One executable per application is the wrong model for games
+
+Resolving a desktop app to a single executable is unreliable in a way that matters.
+Uninstall entries do not record the main binary, so it has to be inferred from the
+install directory, and games ship several executables side by side:
+
+```
+DayZ\  ->  CrashReporter.exe   first implementation picked this
+           DayZDiag_x64.exe    after excluding support executables
+           DayZ_BE.exe         after ranking by folder-name prefix
+           DayZ_x64.exe        the process that actually carries game traffic
+```
+
+Filtering support executables and ranking by name gets closer, but the last step is
+not reachable by naming heuristics — `DayZ_BE.exe` is a legitimate launcher, and
+which of the two carries traffic is only observable at runtime.
+
+This is the §12/§13 problem, and the resolution is process discovery rather than
+better guessing: identify the processes an application actually spawns, and determine
+which are generating network traffic. Until that exists, a rule created from registry
+discovery alone can look correct, report as "configured", and protect nothing —
+exactly the outcome §24 exists to prevent. Heuristic tuning was stopped here
+deliberately rather than pursued to diminishing returns.
 
 ## Rejected approaches
 
