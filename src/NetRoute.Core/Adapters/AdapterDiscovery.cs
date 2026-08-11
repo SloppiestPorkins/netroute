@@ -4,7 +4,7 @@ using NetRoute.Core.Interop;
 
 namespace NetRoute.Core.Adapters;
 
-public sealed class AdapterDiscovery
+public sealed class AdapterDiscovery : IAdapterSource
 {
     // IANA ifType values reported by GetAdaptersAddresses.
     private const uint IF_TYPE_ETHERNET_CSMACD = 6;

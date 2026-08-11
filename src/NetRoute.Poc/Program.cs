@@ -18,6 +18,11 @@ internal static class Program
 {
     private static async Task<int> Main(string[] args)
     {
+        if (args.FirstOrDefault() is "wfp")
+        {
+            return await WfpProof.RunAsync();
+        }
+
         var discovery = new AdapterDiscovery();
         var all = discovery.DiscoverAll();
 

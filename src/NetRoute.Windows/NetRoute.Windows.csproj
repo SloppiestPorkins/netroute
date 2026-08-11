@@ -1,18 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>netroute-poc</AssemblyName>
-    <RootNamespace>NetRoute.Poc</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\NetRoute.Core\NetRoute.Core.csproj" />
-    <ProjectReference Include="..\NetRoute.Windows\NetRoute.Windows.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The interop structs are internal, but their layout is the highest-risk thing
+         in the project and must be asserted directly rather than inferred. -->
+    <InternalsVisibleTo Include="NetRoute.Tests" />
   </ItemGroup>
 
 </Project>
