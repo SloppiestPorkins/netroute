@@ -487,7 +487,7 @@ public partial class AddAppViewModel(MainViewModel main) : ObservableObject
 {
     private List<InstalledApp> _all = [];
 
-    public IReadOnlyList<string> Categories { get; } = ["Games", "Game Pass & Store", "Download apps", "Browsers", "Running now", "Everything"];
+    public IReadOnlyList<string> Categories { get; } = ["Games", "Game Pass & Store", "Download apps", "Chat", "Browsers", "Running now", "Everything"];
     public ObservableCollection<AppChoice> Results { get; } = [];
     public ObservableCollection<DestinationChoice> Destinations { get; } = [];
 
@@ -534,6 +534,7 @@ public partial class AddAppViewModel(MainViewModel main) : ObservableObject
             "Games" => _all.Where(a => a.Category == AppCategory.Game),
             "Game Pass & Store" => _all.Where(a => a.Identity.Kind == AppIdentityKind.Packaged),
             "Download apps" => _all.Where(a => a.Category == AppCategory.Launcher),
+            "Chat" => _all.Where(a => a.Category == AppCategory.Communication),
             "Browsers" => _all.Where(a => a.Category == AppCategory.Browser),
             "Running now" => _all.Where(a => a.IsRunning),
             _ => _all

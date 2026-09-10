@@ -277,7 +277,9 @@ public sealed class NetRouteEngine : IDisposable
     private static string Fingerprint(EnforcementPlan plan)
     {
         var text = string.Join('\n', plan.Applications.OrderBy(a => a.Rule.Id).Select(a => string.Join('|',
-            a.Rule.Id, a.Action, a.ResolvedAdapter?.Luid, a.ResolvedAdapter?.Ipv4Address, a.ResolvedAdapter?.Ipv6Address,
+            // The program path is included so an app updating into a new folder (Discord's
+            // app-x.y.z) re-applies its filters instead of leaving them on the old file.
+            a.Rule.Id, a.Rule.App.ExecutablePath, a.Action, a.ResolvedAdapter?.Luid, a.ResolvedAdapter?.Ipv4Address, a.ResolvedAdapter?.Ipv6Address,
             a.BlockIpv6, a.Rule.Mode, a.Rule.KillSwitch, a.Rule.EnforceIpv4, a.Rule.EnforceIpv6,
             a.Rule.EnforceTcp, a.Rule.EnforceUdp, a.Rule.Paused, a.Rule.IncludeRelatedProcesses)));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));

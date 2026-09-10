@@ -30,8 +30,10 @@ public sealed class PolicyResolver
             resolvedRoles[role] = binding is null ? null : ResolveBinding(binding, adapters);
         }
 
+        // Resolve versioned install folders first, so enforcement always targets the program
+        // that actually runs today rather than the one that ran when the rule was added.
         var applications = config.AppRules
-            .Select(rule => Resolve(rule, config, resolvedRoles))
+            .Select(rule => Resolve(rule with { App = VersionedPaths.Resolve(rule.App) }, config, resolvedRoles))
             .ToList();
 
         var degraded = resolvedRoles

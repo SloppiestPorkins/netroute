@@ -14,8 +14,13 @@ namespace NetRoute.Windows.Split;
 /// <para>Folders are expanded only when they are clearly one game's own folder. Expanding
 /// C:\Windows or Program Files would move system components onto the Gaming network.</para>
 /// </summary>
-public static class SplitImagePaths
+public static partial class SplitImagePaths
 {
+    [System.Text.RegularExpressions.GeneratedRegex(
+        @"^[A-Za-z]:\\Users(\\[^\\]+(\\AppData(\\(Local|LocalLow|Roaming)(\\Programs)?)?)?)?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex UserRoot();
+
     private const int MaxDepth = 4;
     private const int MaxImages = 64;
 
@@ -73,6 +78,13 @@ public static class SplitImagePaths
         if (string.Equals(Path.GetPathRoot(full)?.TrimEnd('\\'), full, StringComparison.OrdinalIgnoreCase))
         {
             return false;   // a whole drive
+        }
+
+        // Any user's profile or AppData root, not just the current account's. The service runs
+        // as SYSTEM, so GetFolderPath below would only ever name SYSTEM's profile.
+        if (UserRoot().IsMatch(full))
+        {
+            return false;
         }
 
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);

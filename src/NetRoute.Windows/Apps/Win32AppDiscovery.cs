@@ -47,9 +47,23 @@ public sealed class Win32AppDiscovery
     private static readonly Dictionary<string, string> Communication = new(StringComparer.OrdinalIgnoreCase)
     {
         ["discord.exe"] = "Discord",
+        ["discordptb.exe"] = "Discord PTB",
+        ["discordcanary.exe"] = "Discord Canary",
         ["teamspeak3.exe"] = "TeamSpeak",
+        ["ts3client_win64.exe"] = "TeamSpeak 3",
+        ["teamspeak.exe"] = "TeamSpeak",
+        ["mumble.exe"] = "Mumble",
+        ["guilded.exe"] = "Guilded",
         ["slack.exe"] = "Slack"
     };
+
+    private static readonly string[] NotGames =
+    [
+        @"\steamapps\common\wallpaper_engine\",
+        @"\steamapps\common\SteamVR\",
+        @"\steamapps\common\Steamworks Shared\",
+        @"\steamapps\common\Steam Controller Configs\"
+    ];
 
     private static readonly string[] UninstallKeys =
     [
@@ -286,6 +300,12 @@ public sealed class Win32AppDiscovery
         if (Communication.ContainsKey(fileName))
         {
             return AppCategory.Communication;
+        }
+
+        // Things that live in Steam's games folder but aren't games.
+        if (NotGames.Any(n => executablePath.Contains(n, StringComparison.OrdinalIgnoreCase)))
+        {
+            return AppCategory.Other;
         }
 
         // Steam games live under steamapps\common and are otherwise indistinguishable
