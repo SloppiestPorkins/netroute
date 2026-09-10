@@ -76,6 +76,12 @@ Steam launches is split by its own path, not by Steam's.
 ## Status
 
 - Protocol serialisation: unit-tested against the layouts in Mullvad's client.
-- The driver has not yet been exercised on this machine. That is what step 3 is for.
+- **TCP proven on the owner's machine (10 Sept 2026):** an unbound `curl` moved from
+  Ethernet to Wi-Fi 2 with the driver Engaged, and went back to Ethernet after Reset.
+  See docs/RESEARCH.md.
+- UDP: the first run tested IPv6 by mistake (see RESEARCH.md). The proof now queries over
+  IPv4; re-run pending.
+- IPv6 is not moved when the target connection has no IPv6. NetRoute must block IPv6 for
+  those apps (§23).
 - Not yet checked: the Windows Firewall sublayer's weight on this machine, which would
   confirm the "low weight" claim, and anti-cheat behaviour with the driver loaded.

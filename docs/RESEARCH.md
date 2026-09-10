@@ -77,6 +77,31 @@ Per-application, per-interface enforcement works, and removing the filters resto
 normal networking. Strict mode, the kill switch and leak prevention rest on this and
 are therefore real today.
 
+## What was proven: moving an unmodified app (10 Sept 2026)
+
+`netroute-poc split`, run elevated by the owner, with Secure Boot on and Mullvad's
+Microsoft-signed split-tunnel driver (see docs/SPLIT-TUNNEL.md). `curl` made an ordinary
+connection with no `--interface`:
+
+```
+Baseline          Ethernet 84.67.213.242   Wi-Fi 2 82.132.230.153   unbound curl 84.67.213.242
+Driver state      Engaged
+Split on          unbound curl 82.132.230.153  -> moved onto Wi-Fi 2   PROVEN (TCP)
+After Reset       unbound curl 84.67.213.242   -> back on Ethernet
+```
+
+This is the mechanism the headline use case depends on (§34), and it works on the owner's
+hardware without a self-built driver. The driver engaged with a physical adapter's address
+as its "tunnel" address, which the driver's source did not obviously guarantee.
+
+The first run's UDP check was invalid, and revealing. `nslookup` queried `ns1.google.com`
+by name, resolved it to IPv6, and sent the query over IPv6 via Ethernet, the only adapter
+with IPv6. It was not moved, because the driver can only move IPv6 onto a connection that
+has IPv6. That is the §23 bypass happening for real: in production, NetRoute's WFP filters
+must block IPv6 for apps pinned to an IPv4-only role, so they fall back to IPv4 and get
+moved. The proof now queries ns1.google.com's IPv4 address for the UDP check and reports
+IPv6 separately.
+
 ## Verification design note (§24)
 
 The probe measures *observed* egress. A WFP filter existing is only *configured*.

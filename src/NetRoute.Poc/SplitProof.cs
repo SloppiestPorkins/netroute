@@ -24,6 +24,11 @@ internal static partial class SplitProof
     private const string Curl = @"C:\Windows\System32\curl.exe";
     private const string Nslookup = @"C:\Windows\System32\nslookup.exe";
 
+    // ns1.google.com, by address. Querying it by name let nslookup pick IPv6 on the first
+    // run, which tested IPv6 routing rather than UDP.
+    private const string Ns1V4 = "216.239.32.10";
+    private const string Ns1V6 = "2001:4860:4802:32::a";
+
     public static async Task<int> RunAsync()
     {
         if (!IsElevated())
@@ -88,11 +93,21 @@ internal static partial class SplitProof
                 Console.WriteLine($"\nDriver state: {driver.GetState()} (expect Engaged)");
 
                 var tcp = await Run(Curl, "--silent", "--max-time", "10", "https://api.ipify.org");
-                var udp = ParseTxtAddress(await Run(Nslookup, "-timeout=5", "-type=TXT", "o-o.myaddr.l.google.com", "ns1.google.com"));
+                var udp = ParseTxtAddress(await Run(Nslookup, "-timeout=5", "-type=TXT", "o-o.myaddr.l.google.com", Ns1V4));
+                var v6 = ParseTxtAddress(await Run(Nslookup, "-timeout=5", "-type=TXT", "o-o.myaddr.l.google.com", Ns1V6));
 
                 Console.WriteLine($"\nWith splitting on:");
                 Console.WriteLine($"  curl (TCP)     egress {Show(tcp)}   expected {moveTcp}");
                 Console.WriteLine($"  nslookup (UDP) egress {Show(udp)}");
+                if (v6 is not null)
+                {
+                    // Informational, not pass/fail. The driver can only move IPv6 onto a connection
+                    // that has IPv6. When the target has none, the app's IPv6 keeps leaving through
+                    // the default adapter. That is the section 23 bypass, and the reason NetRoute
+                    // blocks IPv6 for apps on an IPv4-only network, so they fall back to IPv4 and
+                    // get moved.
+                    Console.WriteLine($"  IPv6 (info)    egress {v6} - not moved: {move.Name} has no IPv6, so NetRoute blocks IPv6 for these apps in real use.");
+                }
 
                 var tcpMoved = tcp == moveTcp;
                 Console.WriteLine();
@@ -107,7 +122,7 @@ internal static partial class SplitProof
                 // TCP address: on this machine the Wi-Fi uplink shows different addresses to
                 // HTTP and DNS (carrier NAT), see docs/RESEARCH.md.
                 driver.Reset();
-                var udpDefault = ParseTxtAddress(await Run(Nslookup, "-timeout=5", "-type=TXT", "o-o.myaddr.l.google.com", "ns1.google.com"));
+                var udpDefault = ParseTxtAddress(await Run(Nslookup, "-timeout=5", "-type=TXT", "o-o.myaddr.l.google.com", Ns1V4));
                 var udpMoved = udp is not null && udp != udpDefault;
                 Console.WriteLine(udpMoved
                     ? $"  UDP: PROVEN - nslookup's query left from {udp}, not the default {udpDefault}."
