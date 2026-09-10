@@ -41,6 +41,13 @@ public sealed record AppIdentity
     public string? Publisher { get; init; }
 
     /// <summary>
+    /// Folder the app was installed to, when discovery knew it. The split-tunnel driver matches
+    /// on program files, and a game often runs as a different .exe from the one its launcher
+    /// starts (DayZ_BE.exe starts DayZ_x64.exe). Knowing the folder lets NetRoute cover all of them.
+    /// </summary>
+    public string? InstallLocation { get; init; }
+
+    /// <summary>
     /// A stable key for this identity, used for config equality and rule lookup.
     /// Prefers the most specific stable identifier available.
     /// </summary>

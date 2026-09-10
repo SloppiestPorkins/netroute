@@ -48,6 +48,7 @@ public sealed class NetRouteEngine : IDisposable
     private DateTimeOffset _policyAppliedAt = DateTimeOffset.MinValue;
     private long _nextEventId;
     private IpcError? _lastError;
+    private string? _redirectSummary;
 
     public NetRouteEngine(
         IAdapterSource adapters,
@@ -88,6 +89,7 @@ public sealed class NetRouteEngine : IDisposable
                 EnforcementActive = _backend.IsAvailable && !config.EnforcementPaused && _ruleErrors.Count == 0,
                 EnforcementPaused = config.EnforcementPaused,
                 RedirectionAvailable = _backend.RedirectionAvailable,
+                RedirectSummary = _redirectSummary,
                 Roles = BuildRoles(config, adapters),
                 Apps = _plan.Applications.Select(a => BuildApp(a, verifications.GetValueOrDefault(a.Rule.Id))).ToList(),
                 RecentLeaks = verifications.Values.SelectMany(v => v.Leaks).OrderByDescending(l => l.At).ToList(),
@@ -173,6 +175,7 @@ public sealed class NetRouteEngine : IDisposable
             var config = _store.Load() with { EnforcementPaused = true };
             _store.Save(config);
             _fingerprint = null;
+            _redirectSummary = "Off. Emergency Disable restored normal Windows networking.";
             AddEvent(ServiceEventKind.EmergencyDisabled, "Emergency disable", "All NetRoute enforcement was disabled.");
         }
         finally { _gate.Release(); }
@@ -203,6 +206,17 @@ public sealed class NetRouteEngine : IDisposable
             _fingerprint = fingerprint;
         }
         _plan = plan;
+
+        if (_backend.IsAvailable)
+        {
+            var summary = _backend.ApplyRedirect(RedirectPlanner.Build(config, plan, _adapters.DiscoverAll()));
+            if (summary is not null && summary != _redirectSummary)
+            {
+                AddEvent(ServiceEventKind.Info, "Moving apps", summary);
+            }
+            _redirectSummary = summary;
+        }
+
         _lastError = !_backend.IsAvailable
             ? new IpcError { FriendlyMessage = _backend.UnavailableReason ?? "Network policy is unavailable." }
             : _ruleErrors.Values.FirstOrDefault();

@@ -42,6 +42,7 @@ static async Task<int> RunAsync(string[] args)
             case "add" when args.Length >= 3: return await AddAsync(client, string.Join(' ', args[1..^1]), args[^1]);
             case "move" when args.Length >= 3: return await MoveAsync(client, string.Join(' ', args[1..^1]), args[^1]);
             case "remove" when args.Length >= 2: return await RemoveAsync(client, string.Join(' ', args[1..]));
+            case "cleanup-driver": return LocalCleanup(removeSublayers: args.Contains("--remove-sublayers"));
             default: Console.Error.WriteLine(Usage); return 1;
         }
         return 0;
@@ -185,7 +186,8 @@ static async Task<AppIdentity?> ResolveAppAsync(string target)
     }
     if (matches.Count == 1)
     {
-        return matches[0].Identity;
+        // Keep the install folder so every program file of a game can be moved, not just one.
+        return matches[0].Identity with { InstallLocation = matches[0].InstallLocation };
     }
 
     Console.Error.WriteLine(matches.Count == 0
@@ -199,6 +201,7 @@ static void PrintStatus(ServiceStatusDto status)
 {
     Console.WriteLine(status.EnforcementPaused ? "Enforcement: paused" : status.EnforcementActive ? "Enforcement: active" : "Enforcement: unavailable");
     if (status.LastError is { } error) Console.WriteLine($"Problem: {error.FriendlyMessage}");
+    if (status.RedirectSummary is { } redirect) Console.WriteLine($"Moving apps: {redirect}");
     PrintRoles(status.Roles);
     PrintApps(status.Apps);
 }
@@ -225,20 +228,78 @@ static int PrintWhy(ServiceStatusDto status, string query)
     return 0;
 }
 
+/// <summary>
+/// Emergency Disable when the service can't be reached (§43). Stopping the service removes
+/// its WFP filters, because they live in a dynamic session, and its shutdown resets the
+/// driver. The local cleanup afterwards covers a service that crashed instead of stopping.
+/// </summary>
 static int StopServiceFallback()
 {
     try
     {
         using var service = new ServiceController("NetRoute");
-        service.Stop();
-        service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15));
-        Console.WriteLine("NetRoute service stopped. Its dynamic WFP session closed, so Windows removed all filters.");
-        return 0;
+        if (service.Status != ServiceControllerStatus.Stopped)
+        {
+            service.Stop();
+            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+        }
+        Console.WriteLine("NetRoute service stopped. Windows removed all of its filters.");
     }
-    catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+    catch (InvalidOperationException)
     {
-        Console.Error.WriteLine("The service could not be stopped. Run this exact command from an elevated terminal:");
-        Console.Error.WriteLine("net stop NetRoute");
-        return ex is Win32Exception { NativeErrorCode: 5 } ? 1 : 2;
+        // Not installed, or not running. Nothing to stop.
     }
+    catch (Win32Exception ex) when (ex.NativeErrorCode == 5)
+    {
+        Console.Error.WriteLine("Run this from an administrator terminal:  netroute emergency-disable");
+        return 1;
+    }
+    return LocalCleanup(removeSublayers: false);
+}
+
+/// <summary>Resets the split-tunnel driver and restores the default route, without the service.</summary>
+static int LocalCleanup(bool removeSublayers)
+{
+    var ok = true;
+    try
+    {
+        using var driver = NetRoute.Windows.Split.SplitTunnelDriver.Open();
+        driver.Reset();
+        Console.WriteLine("Split-tunnel driver reset. No apps are being moved.");
+    }
+    catch (NetRoute.Windows.Split.SplitTunnelException ex) when (ex.InnerException is Win32Exception { NativeErrorCode: 2 })
+    {
+        Console.WriteLine("Split-tunnel driver isn't running. Nothing to reset.");
+    }
+    catch (Exception ex)
+    {
+        ok = false;
+        Console.Error.WriteLine($"Couldn't reset the split-tunnel driver: {ex.Message}");
+    }
+
+    try
+    {
+        new NetRoute.Windows.Split.DefaultRouteManager().Restore();
+        Console.WriteLine("Windows' default connection settings are back to how they were.");
+    }
+    catch (Exception ex)
+    {
+        ok = false;
+        Console.Error.WriteLine($"Couldn't restore the default connection settings: {ex.Message}");
+    }
+
+    if (removeSublayers)
+    {
+        try
+        {
+            NetRoute.Windows.Split.SplitTunnelSublayers.Remove();
+            Console.WriteLine("NetRoute's WFP sublayers removed.");
+        }
+        catch (Exception ex)
+        {
+            ok = false;
+            Console.Error.WriteLine($"Couldn't remove NetRoute's WFP sublayers: {ex.Message}");
+        }
+    }
+    return ok ? 0 : 1;
 }

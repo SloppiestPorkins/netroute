@@ -79,8 +79,9 @@ Steam launches is split by its own path, not by Steam's.
 - **TCP proven on the owner's machine (10 Sept 2026):** an unbound `curl` moved from
   Ethernet to Wi-Fi 2 with the driver Engaged, and went back to Ethernet after Reset.
   See docs/RESEARCH.md.
-- UDP: the first run tested IPv6 by mistake (see RESEARCH.md). The proof now queries over
-  IPv4; re-run pending.
+- **UDP proven too (second run, same day):** an unbound `nslookup` query to ns1.google.com
+  over IPv4 left from Wi-Fi 2's ISP (82.132.230.153), not Ethernet's (84.67.213.242). The
+  first run had tested IPv6 by mistake (see RESEARCH.md).
 - IPv6 is not moved when the target connection has no IPv6. NetRoute must block IPv6 for
   those apps (§23).
 - Not yet checked: the Windows Firewall sublayer's weight on this machine, which would

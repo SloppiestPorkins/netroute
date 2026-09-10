@@ -155,6 +155,9 @@ public sealed record ServiceStatusDto
     /// </summary>
     public required bool RedirectionAvailable { get; init; }
 
+    /// <summary>One sentence on whether apps are being moved right now, and onto what.</summary>
+    public string? RedirectSummary { get; init; }
+
     public required IReadOnlyList<RoleStatusDto> Roles { get; init; }
     public required IReadOnlyList<AppStatusDto> Apps { get; init; }
     public required IReadOnlyList<LeakObservation> RecentLeaks { get; init; }
