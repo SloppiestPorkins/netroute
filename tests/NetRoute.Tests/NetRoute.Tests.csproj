@@ -23,6 +23,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\NetRoute.Core\NetRoute.Core.csproj" />
     <ProjectReference Include="..\..\src\NetRoute.Windows\NetRoute.Windows.csproj" />
+    <ProjectReference Include="..\..\src\NetRoute.Ipc\NetRoute.Ipc.csproj" />
+    <ProjectReference Include="..\..\src\NetRoute.Service\NetRoute.Service.csproj" />
   </ItemGroup>
 
 </Project>

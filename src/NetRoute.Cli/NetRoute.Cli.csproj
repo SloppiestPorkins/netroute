@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetRoute.Core\NetRoute.Core.csproj" />
+    <ProjectReference Include="..\NetRoute.Ipc\NetRoute.Ipc.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>netroute</AssemblyName>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
