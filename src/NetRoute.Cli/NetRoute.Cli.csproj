@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\NetRoute.Core\NetRoute.Core.csproj" />
     <ProjectReference Include="..\NetRoute.Ipc\NetRoute.Ipc.csproj" />
+    <ProjectReference Include="..\NetRoute.Windows\NetRoute.Windows.csproj" />
   </ItemGroup>
 
   <ItemGroup>

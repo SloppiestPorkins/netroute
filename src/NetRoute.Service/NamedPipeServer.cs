@@ -2,11 +2,12 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using NetRoute.Ipc;
 
 namespace NetRoute.Service;
 
-public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = null, bool secure = true)
+public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = null, bool secure = true, ILogger<NamedPipeServer>? logger = null)
 {
     private readonly string _pipeName = pipeName ?? IpcProtocol.PipeName;
 
@@ -15,14 +16,28 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
         var clients = new List<Task>();
         while (!ct.IsCancellationRequested)
         {
-            var pipe = CreatePipe();
+            NamedPipeServerStream? pipe = null;
             try
             {
+                pipe = CreatePipe();
                 await pipe.WaitForConnectionAsync(ct);
                 clients.RemoveAll(t => t.IsCompleted);
                 clients.Add(ServeAsync(pipe, ct));
+                pipe = null;   // ServeAsync owns it now
             }
-            catch { pipe.Dispose(); if (ct.IsCancellationRequested) break; throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                pipe?.Dispose();
+                break;
+            }
+            catch (Exception ex)
+            {
+                // One failed accept must never take the endpoint down for good: that would
+                // strand the GUI and CLI, Emergency Disable included, until the service restarts.
+                pipe?.Dispose();
+                logger?.LogWarning(ex, "Accepting a NetRoute pipe client failed; retrying.");
+                try { await Task.Delay(500, ct); } catch (OperationCanceledException) { break; }
+            }
         }
         await Task.WhenAll(clients);
     }
@@ -40,6 +55,11 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.InteractiveSid, null), PipeAccessRights.ReadWrite, AccessControlType.Allow));
+        // The server's own identity needs CreateNewInstance to open the pipe's next instance.
+        // As LocalSystem that is already covered; run any other way (a developer's console),
+        // the second client would otherwise be refused. A no-op for the installed service.
+        if (WindowsIdentity.GetCurrent().User is { } self)
+            security.AddAccessRule(new PipeAccessRule(self, PipeAccessRights.FullControl, AccessControlType.Allow));
         return NamedPipeServerStreamAcl.Create(_pipeName, PipeDirection.InOut, NamedPipeServerStream.MaxAllowedServerInstances,
             PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 0, security);
     }
