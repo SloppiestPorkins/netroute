@@ -24,6 +24,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 $target = Join-Path $env:ProgramFiles 'NetRoute'
 $cli = Join-Path $target 'netroute.exe'
 
+Get-Process -Name 'NetRoute.App' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\NetRoute.lnk') -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'NetRoute.lnk') -Force -ErrorAction SilentlyContinue
+
 $service = Get-Service -Name NetRoute -ErrorAction SilentlyContinue
 if ($service) {
     if ($service.Status -ne 'Stopped') {

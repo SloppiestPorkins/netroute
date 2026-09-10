@@ -44,8 +44,10 @@ if ($service -and $service.Status -ne 'Stopped') {
 
 Step '2. Building NetRoute'
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Fail 'The .NET SDK is not installed.' }
+# A running copy of the app would lock its files.
+Get-Process -Name 'NetRoute.App' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 $ErrorActionPreference = 'Continue'   # dotnet writes progress to stderr; don't treat it as fatal
-foreach ($project in 'src\NetRoute.Service', 'src\NetRoute.Cli') {
+foreach ($project in 'src\NetRoute.Service', 'src\NetRoute.Cli', 'src\NetRoute.App') {
     & dotnet publish (Join-Path $root $project) -c Release -o $target --nologo -v q 2>&1 | ForEach-Object { "  $_" }
     if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = 'Stop'; Fail "Building $project failed." }
 }
@@ -73,14 +75,36 @@ if (($machinePath -split ';') -notcontains $target) {
 }
 $env:Path = "$env:Path;$target"
 
+Step '5. Shortcuts'
+$appExe = Join-Path $target 'NetRoute.App.exe'
+$shell = New-Object -ComObject WScript.Shell
+$startMenu = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\NetRoute.lnk'
+$link = $shell.CreateShortcut($startMenu)
+$link.TargetPath = $appExe
+$link.WorkingDirectory = $target
+$link.Description = 'Keep your apps on the network you chose'
+$link.Save()
+# Start with Windows, straight to the tray (§41).
+$startup = Join-Path ([Environment]::GetFolderPath('Startup')) 'NetRoute.lnk'
+$link = $shell.CreateShortcut($startup)
+$link.TargetPath = $appExe
+$link.Arguments = '--minimized'
+$link.WorkingDirectory = $target
+$link.Save()
+Write-Host '  Start menu shortcut added; NetRoute starts in the tray when you sign in.'
+
 Step 'Status'
 & (Join-Path $target 'netroute.exe') status
 
+# Open the app as the signed-in user, not elevated: explorer launches it outside this admin session.
+Start-Process explorer.exe -ArgumentList "`"$appExe`""
+
 Write-Host @"
 
-  NetRoute is installed and running.
+  NetRoute is installed and running, and the NetRoute app is opening.
+  Pick your Gaming and Download networks in the app, then press Add App.
 
-  In a NEW terminal:
+  Prefer the command line? In a NEW terminal:
     netroute adapters                          see your connections
     netroute setup Ethernet "Wi-Fi 2"           Gaming = Ethernet, Downloads = Wi-Fi 2
     netroute add Steam downloads
