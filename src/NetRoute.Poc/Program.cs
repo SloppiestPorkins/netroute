@@ -24,6 +24,8 @@ internal static class Program
                 return await WfpProof.RunAsync();
             case "apps":
                 return await AppDiscoveryProof.RunAsync();
+            case "split":
+                return await SplitProof.RunAsync();
         }
 
         var discovery = new AdapterDiscovery();
