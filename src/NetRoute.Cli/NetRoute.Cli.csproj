@@ -5,6 +5,11 @@
     <ProjectReference Include="..\NetRoute.Ipc\NetRoute.Ipc.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Already present transitively in the solution through WindowsServices; the CLI needs its compile-time API. -->
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>netroute</AssemblyName>
