@@ -85,6 +85,12 @@ public sealed record RoleStatusDto
     /// <summary>Round-trip latency via this adapter, when measured.</summary>
     public int? LatencyMs { get; init; }
 
+    /// <summary>Recent packet loss through this adapter, 0-100, when measured.</summary>
+    public double? PacketLossPercent { get; init; }
+
+    /// <summary>Whether the internet answered through this adapter at the last probe.</summary>
+    public bool? InternetReachable { get; init; }
+
     /// <summary>Number of rules that point at this role.</summary>
     public required int AssignedApps { get; init; }
 
