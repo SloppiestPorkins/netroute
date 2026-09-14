@@ -1,0 +1,34 @@
+NetRoute includes the following third-party software.
+
+
+mullvad-split-tunnel.sys  (version 1.3.0.0)
+------------------------------------------
+Windows split-tunnel driver by Mullvad VPN AB, Microsoft-signed by Mullvad VPN AB.
+Distributed unmodified.
+
+Source code:  https://github.com/mullvad/win-split-tunnel
+
+Licensed under either the Mozilla Public License 2.0 or the GNU General Public License,
+version 3 or later, at the recipient's option. NetRoute distributes it under the
+Mozilla Public License 2.0:  https://mozilla.org/MPL/2.0/
+
+NetRoute talks to the driver as a separate program, through its device interface.
+NetRoute is not made by, affiliated with, or endorsed by Mullvad VPN AB.
+
+
+.NET 8 runtime
+--------------
+Microsoft Corporation. MIT License.
+https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+
+
+Microsoft.Diagnostics.Tracing.TraceEvent
+----------------------------------------
+Microsoft Corporation. MIT License.
+https://github.com/microsoft/perfview/blob/main/LICENSE.TXT
+
+
+CommunityToolkit.Mvvm
+---------------------
+.NET Foundation and Contributors. MIT License.
+https://github.com/CommunityToolkit/dotnet/blob/main/License.md
