@@ -285,6 +285,9 @@ public sealed class Win32AppDiscovery
         return SupportExecutableMarkers.Any(m => name.Contains(m, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Launcher, browser, chat, game or other, judged from the program's path.</summary>
+    public static AppCategory CategoryOf(string executablePath) => Classify(executablePath);
+
     private static AppCategory Classify(string executablePath)
     {
         var fileName = Path.GetFileName(executablePath);

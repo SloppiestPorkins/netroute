@@ -28,6 +28,10 @@ internal static class Program
                 return await SplitProof.RunAsync();
             case "routes":
                 return RouteTableProof.Run();
+            case "probe":
+                return MeterProof.Probe();
+            case "meter":
+                return MeterProof.Meter();
         }
 
         var discovery = new AdapterDiscovery();

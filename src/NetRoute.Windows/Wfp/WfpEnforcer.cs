@@ -46,6 +46,7 @@ public sealed class WfpEnforcer
     {
         var applied = new List<AppliedRule>();
         var failed = new List<FailedRule>();
+        WfpException? systemError = null;
 
         _session.InTransaction(() =>
         {
@@ -68,9 +69,63 @@ public sealed class WfpEnforcer
                     failed.Add(new FailedRule(app, ex));
                 }
             }
+
+            if (plan.SystemDownloads is { } system)
+            {
+                try
+                {
+                    ApplySystemDownloads(system);
+                }
+                catch (WfpException ex)
+                {
+                    systemError = ex;
+                }
+            }
         });
 
-        return new EnforcementResult(applied, failed);
+        return new EnforcementResult(applied, failed, systemError);
+    }
+
+    private static readonly Guid[] V4Layers = [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4];
+    private static readonly Guid[] V6Layers = [FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6];
+
+    /// <summary>
+    /// Keeps Windows' download services on Downloads: the same permit-there, block-elsewhere
+    /// shape as an app, keyed on each service's SID (see <see cref="SystemDownloadsPlan"/>).
+    /// </summary>
+    private void ApplySystemDownloads(SystemDownloadsPlan plan)
+    {
+        using var scope = new ConditionScope();
+        foreach (var service in plan.Services)
+        {
+            var identity = scope.ServiceUser(service);
+            var label = $"Windows downloads ({service})";
+            foreach (var layer in V4Layers)
+            {
+                AddServicePinned(scope, layer, identity, plan.Adapter.Luid, label);
+            }
+            foreach (var layer in V6Layers)
+            {
+                if (plan.BlockIpv6)
+                {
+                    AddFilter(scope, layer, [identity], FWP_ACTION_BLOCK, WeightCatchAllBlock, $"{label}: IPv6 blocked, Downloads is IPv4-only");
+                }
+                else
+                {
+                    AddServicePinned(scope, layer, identity, plan.Adapter.Luid, label);
+                }
+            }
+        }
+    }
+
+    private void AddServicePinned(ConditionScope scope, Guid layer, FWPM_FILTER_CONDITION0 identity, ulong luid, string label)
+    {
+        AddFilter(scope, layer, [identity, scope.LocalInterface(luid)], FWP_ACTION_PERMIT, WeightRolePermit, $"{label}: permit on Downloads");
+        if (_loopbackLuid is { } loopback)
+        {
+            AddFilter(scope, layer, [identity, scope.LocalInterface(loopback)], FWP_ACTION_PERMIT, WeightLoopbackPermit, $"{label}: permit loopback");
+        }
+        AddFilter(scope, layer, [identity], FWP_ACTION_BLOCK, WeightCatchAllBlock, $"{label}: block outside Downloads");
     }
 
     /// <summary>
@@ -271,7 +326,8 @@ public sealed record FailedRule(AppEnforcement Enforcement, WfpException Error);
 
 public sealed record EnforcementResult(
     IReadOnlyList<AppliedRule> Applied,
-    IReadOnlyList<FailedRule> Failed)
+    IReadOnlyList<FailedRule> Failed,
+    WfpException? SystemDownloadsError = null)
 {
     public int TotalFilters => Applied.Sum(a => a.FilterCount);
     public bool FullySucceeded => Failed.Count == 0;

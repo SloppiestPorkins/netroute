@@ -105,6 +105,8 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
                 IpcCommands.SetEnforcementPaused => await SetPaused(request, ct),
                 IpcCommands.EmergencyDisable => await EmergencyDisable(ct),
                 IpcCommands.FixRouteTie => await engine.FixRouteTieAsync(ct),
+                IpcCommands.GetAppRates => engine.GetAppRates(),
+                IpcCommands.SetSystemDownloads => await SetSystemDownloads(request, ct),
                 _ => throw new NetRouteServiceException(new IpcError { FriendlyMessage = "NetRoute does not recognize that command.", TechnicalDetail = $"Unknown command: {request.Command}" })
             };
             return new IpcResponse { Ok = true, Payload = value is null ? null : JsonSerializer.SerializeToElement(value, IpcProtocol.JsonOptions) };
@@ -121,7 +123,8 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
     private async Task<object?> UpdateRule(IpcRequest r, CancellationToken ct) { await engine.UpdateRuleAsync(Payload<UpdateRuleRequest>(r).Rule, ct); return null; }
     private async Task<object?> RemoveRule(IpcRequest r, CancellationToken ct) { await engine.RemoveRuleAsync(Payload<RuleIdRequest>(r).RuleId, ct); return null; }
     private async Task<object?> SetRulePaused(IpcRequest r, CancellationToken ct) { var p = Payload<SetRulePausedRequest>(r); await engine.SetRulePausedAsync(p.RuleId, p.Paused, ct); return null; }
-    private async Task<object?> SetPaused(IpcRequest r, CancellationToken ct) { await engine.SetEnforcementPausedAsync(Payload<SetPausedRequest>(r).Paused, ct); return null; }
+    private async Task<object?> SetPaused(IpcRequest r, CancellationToken ct) { var p = Payload<SetPausedRequest>(r); await engine.SetEnforcementPausedAsync(p.Paused, p.Minutes, ct); return null; }
+    private async Task<object?> SetSystemDownloads(IpcRequest r, CancellationToken ct) { await engine.SetSystemDownloadsAsync(Payload<SetSystemDownloadsRequest>(r).Enabled, ct); return null; }
     private async Task<object?> EmergencyDisable(CancellationToken ct) { await engine.EmergencyDisableAsync(ct); return null; }
     private static IpcResponse Failure(Exception ex) => ex is NetRouteServiceException service
         ? new() { Ok = false, Error = service.Error }

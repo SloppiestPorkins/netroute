@@ -18,4 +18,8 @@
     <InternalsVisibleTo Include="NetRoute.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
+  </ItemGroup>
+
 </Project>

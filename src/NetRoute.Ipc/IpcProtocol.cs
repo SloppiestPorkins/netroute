@@ -43,6 +43,8 @@ public static class IpcCommands
     public const string SetEnforcementPaused = "setEnforcementPaused";
     public const string EmergencyDisable = "emergencyDisable";
     public const string FixRouteTie = "fixRouteTie";
+    public const string GetAppRates = "getAppRates";
+    public const string SetSystemDownloads = "setSystemDownloads";
 }
 
 public sealed record IpcRequest

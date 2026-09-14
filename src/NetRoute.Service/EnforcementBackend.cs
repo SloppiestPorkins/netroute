@@ -7,7 +7,7 @@ namespace NetRoute.Service;
 
 public sealed record RuleEnforcementFailure(Guid RuleId, Exception Error);
 
-public sealed record BackendApplyResult(IReadOnlyList<RuleEnforcementFailure> Failures)
+public sealed record BackendApplyResult(IReadOnlyList<RuleEnforcementFailure> Failures, string? SystemDownloadsError = null)
 {
     public static BackendApplyResult Success { get; } = new([]);
 }
@@ -71,7 +71,8 @@ public sealed class WfpEnforcementBackend : IEnforcementBackend
     public BackendApplyResult Apply(EnforcementPlan plan)
     {
         var result = _enforcer.Apply(plan);
-        return new(result.Failed.Select(f => new RuleEnforcementFailure(f.Enforcement.Rule.Id, f.Error)).ToList());
+        return new(result.Failed.Select(f => new RuleEnforcementFailure(f.Enforcement.Rule.Id, f.Error)).ToList(),
+            result.SystemDownloadsError?.FriendlyMessage);
     }
 
     public string? ApplyRedirect(RedirectPlan plan)

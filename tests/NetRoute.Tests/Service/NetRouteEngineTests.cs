@@ -105,6 +105,24 @@ public sealed class NetRouteEngineTests : IDisposable
         Assert.Equal(1, backend.FixCount);
     }
 
+    [Fact]
+    public async Task TimedPauseEndsByItself()
+    {
+        new ConfigStore(ConfigPath).Save(new NetRouteConfig { EnforcementPaused = true, PausedUntil = DateTimeOffset.UtcNow.AddMinutes(-1) });
+        using var engine = new NetRouteEngine(new MutableAdapterSource(Ethernet(), Wifi()), new CountingBackend(), ConfigPath);
+        await engine.ReconcileAsync();
+        var resumed = await engine.GetStatusAsync();
+        Assert.False(resumed.EnforcementPaused);
+        Assert.Null(resumed.PausedUntil);
+        Assert.Contains(resumed.RecentEvents, e => e.Kind == ServiceEventKind.Resumed);
+
+        await engine.SetEnforcementPausedAsync(true, 60);
+        await engine.ReconcileAsync();
+        var paused = await engine.GetStatusAsync();
+        Assert.True(paused.EnforcementPaused);
+        Assert.InRange(paused.PausedUntil!.Value, DateTimeOffset.UtcNow.AddMinutes(59), DateTimeOffset.UtcNow.AddMinutes(61));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);

@@ -113,7 +113,7 @@
                 </Grid.RowDefinitions>
                 <TextBlock Text="What's using each network" Style="{StaticResource H2}" />
                 <TextBlock Grid.Row="1" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16"
-                           Text="Live connections, refreshed every 2 seconds. Traffic that stays inside your PC isn't shown." />
+                           Text="Live connections and speeds, refreshed every 2 seconds. Traffic that stays inside your PC isn't shown." />
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock Text="{Binding Empty}" Style="{StaticResource Caption}" Visibility="{Binding Empty, Converter={StaticResource NullVisibility}}" />
@@ -135,6 +135,7 @@
                                                 <DataTemplate>
                                                     <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="8" Padding="12,8" Margin="0,0,0,4">
                                                         <DockPanel>
+                                                            <TextBlock DockPanel.Dock="Right" Text="{Binding Rate}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="14,0,0,0" />
                                                             <TextBlock DockPanel.Dock="Right" Text="{Binding Detail}" Style="{StaticResource Caption}" VerticalAlignment="Center" />
                                                             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                                                         </DockPanel>
@@ -166,6 +167,106 @@
                     <Button Content="Cancel" Margin="0,0,8,0" IsCancel="True"
                             Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
                     <Button Content="{Binding ConfirmText}" Style="{StaticResource DangerButton}" Command="{Binding ConfirmCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Pause: for how long -->
+        <DataTemplate DataType="{x:Type local:PauseViewModel}">
+            <StackPanel Width="460">
+                <TextBlock Text="Pause protection" Style="{StaticResource H2}" />
+                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16"
+                           Text="While paused, every app uses normal Windows routing. Your app list is kept." />
+                <ItemsControl ItemsSource="{Binding Choices}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Style="{StaticResource ChoiceButton}"
+                                    Command="{Binding DataContext.ChooseCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    CommandParameter="{Binding}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Content="Cancel" HorizontalAlignment="Right" Margin="0,8,0,0" IsCancel="True"
+                        Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- Check-up -->
+        <DataTemplate DataType="{x:Type local:HealthViewModel}">
+            <Grid Width="660" MaxHeight="600">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Check-up" Style="{StaticResource H2}" />
+                <TextBlock Grid.Row="1" Text="{Binding Summary}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16" />
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Items}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="14,12" Margin="0,0,0,8">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" Content="{Binding FixText}" Style="{StaticResource PrimaryButton}" VerticalAlignment="Center" Margin="14,0,0,0"
+                                                Visibility="{Binding FixText, Converter={StaticResource NullVisibility}}"
+                                                Command="{Binding DataContext.FixCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}" />
+                                        <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" Foreground="{Binding Brush}" VerticalAlignment="Top" Margin="0,2,12,0" />
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                       Visibility="{Binding Detail, Converter={StaticResource NullVisibility}}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                    <Button Content="Check again" Margin="0,0,8,0" Command="{Binding RecheckCommand}" />
+                    <Button Content="Close" IsCancel="True"
+                            Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- After setup: put download apps on Downloads -->
+        <DataTemplate DataType="{x:Type local:SuggestDownloadsViewModel}">
+            <StackPanel Width="520">
+                <TextBlock Text="Keep downloads off your Gaming connection?" Style="{StaticResource H2}" TextWrapping="Wrap" />
+                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16"
+                           Text="These download apps are on your PC. Put them on Downloads so game updates never compete with your games. You can change this later." />
+                <TextBlock Text="Looking for download apps…" Style="{StaticResource Caption}"
+                           Visibility="{Binding Loading, Converter={StaticResource BoolVisibility}}" />
+                <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Style="{StaticResource ChoiceButton}" Command="{Binding ToggleCommand}">
+                                <DockPanel>
+                                    <TextBlock Style="{StaticResource Icon}" Text="{Binding CheckGlyph}" FontSize="18"
+                                               Foreground="{StaticResource DownloadsBrush}" VerticalAlignment="Center" Margin="0,0,14,0" />
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Caption}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,10,0,0"
+                           Text="Windows Update, Microsoft Store and Xbox app downloads are kept on Downloads too. You can turn that off in Check-up." />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                    <Button Content="Skip" Margin="0,0,8,0" IsCancel="True"
+                            Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    <Button Content="Put on Downloads" Style="{StaticResource PrimaryButton}" Command="{Binding AddSelectedCommand}" />
                 </StackPanel>
             </StackPanel>
         </DataTemplate>
@@ -314,6 +415,12 @@
             <!-- Header -->
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Command="{Binding OpenCheckupCommand}" Margin="0,0,8,0" ToolTip="Check everything that affects where your traffic goes">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE9D9;" Margin="0,0,8,0" />
+                            <TextBlock Text="{Binding CheckupText}" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding OpenLiveCommand}" Margin="0,0,8,0" ToolTip="See which apps are using each network right now">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE9D2;" Margin="0,0,8,0" />
@@ -346,6 +453,20 @@
 
             <!-- Banners -->
             <StackPanel Grid.Row="1">
+                <!-- A game is online that isn't in the list -->
+                <Border Background="{StaticResource GamingTintBrush}" CornerRadius="10" Padding="14,10" Margin="0,16,0,0"
+                        Visibility="{Binding NewGame, Converter={StaticResource NullVisibility}}">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                            <Button Content="Don't ask again" Style="{StaticResource GhostButton}" Margin="0,0,4,0" Command="{Binding NeverNewGameCommand}" />
+                            <Button Content="Not now" Style="{StaticResource GhostButton}" Margin="0,0,8,0" Command="{Binding DismissNewGameCommand}" />
+                            <Button Content="Put on Gaming" Style="{StaticResource PrimaryButton}" Command="{Binding AcceptNewGameCommand}" />
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE7FC;" Foreground="{StaticResource GamingBrush}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBlock Text="{Binding NewGame.Message}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
+
                 <Border Background="{StaticResource WarnTintBrush}" BorderBrush="#55F5A524" BorderThickness="1"
                         CornerRadius="10" Padding="14,10" Margin="0,16,0,0"
                         Visibility="{Binding Banner, Converter={StaticResource NullVisibility}}">

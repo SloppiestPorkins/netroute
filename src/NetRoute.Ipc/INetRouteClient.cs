@@ -37,11 +37,18 @@ public interface INetRouteClient
 
     Task SetRulePausedAsync(Guid ruleId, bool paused, CancellationToken ct = default);
 
-    Task SetEnforcementPausedAsync(bool paused, CancellationToken ct = default);
+    /// <summary>Pause or resume everything. With <paramref name="minutes"/>, the pause ends by itself.</summary>
+    Task SetEnforcementPausedAsync(bool paused, int? minutes = null, CancellationToken ct = default);
 
     /// <summary>Remove every NetRoute filter and keep enforcement off until resumed (§43).</summary>
     Task EmergencyDisableAsync(CancellationToken ct = default);
 
     /// <summary>Give Windows one default connection when two are tied (see <see cref="RouteTieDto"/>).</summary>
     Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default);
+
+    /// <summary>Per-program speeds on each network right now.</summary>
+    Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default);
+
+    /// <summary>Keep Windows Update, Store and Xbox downloads on Downloads (see SystemDownloadsPlan).</summary>
+    Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default);
 }

@@ -21,6 +21,13 @@ builder.ConfigureServices(services =>
     services.AddSingleton<ConnectionVerifier>();
     services.AddSingleton<NetRoute.Core.Traffic.IAppVerifier>(sp => sp.GetRequiredService<ConnectionVerifier>());
     services.AddSingleton<IConnectionSource>(sp => sp.GetRequiredService<ConnectionVerifier>());
+    // Measured ping/loss per network, and per-app speeds (ETW).
+    services.AddSingleton<LinkQualityMonitor>();
+    services.AddSingleton<ILinkQualitySource>(sp => sp.GetRequiredService<LinkQualityMonitor>());
+    services.AddHostedService(sp => sp.GetRequiredService<LinkQualityMonitor>());
+    services.AddSingleton<AppRateMonitor>();
+    services.AddSingleton<IAppRateSource>(sp => sp.GetRequiredService<AppRateMonitor>());
+    services.AddHostedService(sp => sp.GetRequiredService<AppRateMonitor>());
     services.AddSingleton<NetRouteEngine>();
     services.AddSingleton<NamedPipeServer>();
     services.AddHostedService<ServiceWorker>();

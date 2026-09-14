@@ -17,6 +17,15 @@ public sealed record NetRouteConfig
     /// <summary>Global pause. Enforcement stops but rules are retained (§41).</summary>
     public bool EnforcementPaused { get; init; }
 
+    /// <summary>When set, the pause ends by itself at this time. Null means paused until resumed.</summary>
+    public DateTimeOffset? PausedUntil { get; init; }
+
+    /// <summary>
+    /// Keep Windows' own download services (Windows Update, Store, Xbox app) on the Downloads
+    /// network too. They aren't apps a user can pick, so this is a switch rather than a rule.
+    /// </summary>
+    public bool RouteSystemDownloads { get; init; } = true;
+
     public RoleBinding? BindingFor(RoleId role)
         => RoleBindings.FirstOrDefault(b => b.Role == role);
 }

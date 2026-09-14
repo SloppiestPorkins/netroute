@@ -42,7 +42,16 @@ public sealed class PolicyResolver
             .Select(kv => kv.Key)
             .ToList();
 
-        return new EnforcementPlan { Applications = applications, DegradedRoles = degraded };
+        // Only while Downloads is actually usable: these services carry Windows Update, and
+        // cutting it off because the Wi-Fi dropped would be worse than letting it roam.
+        var downloads = resolvedRoles.GetValueOrDefault(RoleId.Downloads);
+        var gaming = resolvedRoles.GetValueOrDefault(RoleId.Gaming);
+        var system = config.RouteSystemDownloads && config.SetupCompleted && !config.EnforcementPaused
+                     && downloads is { State: AdapterState.Connected } && downloads.Luid != gaming?.Luid
+            ? new SystemDownloadsPlan(downloads, downloads.IsIpv4Only, SystemDownloadsPlan.WindowsDownloadServices)
+            : null;
+
+        return new EnforcementPlan { Applications = applications, DegradedRoles = degraded, SystemDownloads = system };
     }
 
     private static NetworkAdapter? ResolveBinding(RoleBinding binding, IReadOnlyList<NetworkAdapter> adapters)

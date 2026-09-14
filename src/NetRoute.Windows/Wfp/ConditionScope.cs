@@ -16,6 +16,14 @@ internal sealed class ConditionScope : IDisposable
     private readonly List<IntPtr> _hGlobal = [];
     private readonly List<IntPtr> _wfpAllocated = [];
     private readonly List<IntPtr> _sids = [];
+    private readonly List<IntPtr> _localAlloc = [];
+
+    [DllImport("advapi32.dll", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        string sddl, uint revision, out IntPtr securityDescriptor, out uint size);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern IntPtr LocalFree(IntPtr memory);
 
     [DllImport("userenv.dll", ExactSpelling = true, CharSet = CharSet.Unicode)]
     private static extern int DeriveAppContainerSidFromAppContainerName(
@@ -62,6 +70,32 @@ internal sealed class ConditionScope : IDisposable
             fieldKey = FWPM_CONDITION_ALE_PACKAGE_ID,
             matchType = FwpMatchType.Equal,
             conditionValue = new FWP_VALUE0 { type = FwpDataType.Sid, value = sid }
+        };
+    }
+
+    /// <summary>
+    /// Matches a Windows service's traffic by its service SID, the same way Windows Firewall
+    /// scopes a rule to a service. The rest of a shared svchost is left alone.
+    /// </summary>
+    public FWPM_FILTER_CONDITION0 ServiceUser(string serviceName)
+    {
+        var sddl = $"O:LSD:(A;;CC;;;{ServiceSids.For(serviceName)})";
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out var descriptor, out var size))
+        {
+            throw new WfpException(
+                $"ConvertStringSecurityDescriptorToSecurityDescriptorW({serviceName})", unchecked((uint)Marshal.GetHRForLastWin32Error()));
+        }
+        _localAlloc.Add(descriptor);
+
+        var blob = Marshal.AllocHGlobal(Marshal.SizeOf<FWP_BYTE_BLOB>());
+        _hGlobal.Add(blob);
+        Marshal.StructureToPtr(new FWP_BYTE_BLOB { size = size, data = descriptor }, blob, false);
+
+        return new FWPM_FILTER_CONDITION0
+        {
+            fieldKey = FWPM_CONDITION_ALE_USER_ID,
+            matchType = FwpMatchType.Equal,
+            conditionValue = new FWP_VALUE0 { type = FwpDataType.SecurityDescriptor, value = blob }
         };
     }
 
@@ -128,5 +162,11 @@ internal sealed class ConditionScope : IDisposable
             FreeSid(p);
         }
         _sids.Clear();
+
+        foreach (var p in _localAlloc)
+        {
+            LocalFree(p);
+        }
+        _localAlloc.Clear();
     }
 }

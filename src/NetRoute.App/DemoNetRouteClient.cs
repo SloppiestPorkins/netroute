@@ -24,6 +24,8 @@ public sealed class DemoNetRouteClient : INetRouteClient
     private bool _setup;
     private bool _paused;
     private bool _tied = true;
+    private DateTimeOffset? _pausedUntil;
+    private bool _systemDownloads = true;
 
     public DemoNetRouteClient(bool firstRun)
     {
@@ -45,22 +47,24 @@ public sealed class DemoNetRouteClient : INetRouteClient
     public Task<IReadOnlyList<ConnectionDto>> GetConnectionsAsync(CancellationToken ct = default)
     {
         var list = new List<ConnectionDto>();
-        void Add(string name, int pid, string? adapter, string ip, int tcp, int udp)
+        void Add(string name, int pid, string? adapter, string ip, int tcp, int udp, string? path = null)
         {
             for (var i = 0; i < tcp; i++)
             {
-                list.Add(new ConnectionDto { ProcessId = pid, ProcessName = name, Protocol = TransportProtocol.Tcp,
+                list.Add(new ConnectionDto { ProcessId = pid, ProcessName = name, Protocol = TransportProtocol.Tcp, ExecutablePath = path,
                     LocalEndpoint = $"{ip}:{50000 + i}", RemoteEndpoint = $"203.0.113.{i + 1}:443", InterfaceName = adapter, State = "Established" });
             }
             for (var i = 0; i < udp; i++)
             {
-                list.Add(new ConnectionDto { ProcessId = pid, ProcessName = name, Protocol = TransportProtocol.Udp,
+                list.Add(new ConnectionDto { ProcessId = pid, ProcessName = name, Protocol = TransportProtocol.Udp, ExecutablePath = path,
                     LocalEndpoint = $"{ip}:{60000 + i}", InterfaceName = adapter });
             }
         }
         Add("steam", 4120, "Wi-Fi 2", "192.168.7.7", 14, 0);
         Add("steamwebhelper", 4188, "Wi-Fi 2", "192.168.7.7", 6, 0);
-        Add("HaloInfinite", 7788, "Ethernet", "192.168.0.51", 3, 2);
+        Add("HaloInfinite", 7788, "Ethernet", "192.168.0.51", 3, 2, @"G:\SteamLibrary\steamapps\common\Halo Infinite\HaloInfinite.exe");
+        Add("ForzaHorizon5", 8120, "Wi-Fi 2", "192.168.7.7", 2, 1, @"G:\SteamLibrary\steamapps\common\ForzaHorizon5\ForzaHorizon5.exe");
+        Add("OneDrive", 3300, "Ethernet", "192.168.0.51", 5, 0, @"C:\Program Files\Microsoft OneDrive\OneDrive.exe");
         Add("Discord", 5021, "Ethernet", "192.168.0.51", 4, 1);
         Add("brave", 9001, "Wi-Fi 2", "192.168.7.7", 9, 1);
         Add("svchost", 1200, "Wi-Fi 2", "192.168.7.7", 2, 0);
@@ -107,6 +111,10 @@ public sealed class DemoNetRouteClient : INetRouteClient
             SetupCompleted = _setup,
             EnforcementActive = !_paused,
             EnforcementPaused = _paused,
+            PausedUntil = _paused ? _pausedUntil : null,
+            SystemDownloads = _systemDownloads
+                ? new SystemDownloadsDto(true, !_paused, "On. Windows Update, Microsoft Store and Xbox app downloads are kept on Wi-Fi 2, with IPv6 blocked because Wi-Fi 2 has none.")
+                : new SystemDownloadsDto(false, false, "Off. Windows Update, Microsoft Store and Xbox app downloads use whichever connection Windows picks."),
             RedirectionAvailable = true,
             RedirectSummary = $"On. {_rules.Count(r => r.Role == RoleId.Gaming)} Gaming apps are moved onto Ethernet; Wi-Fi 2 is Windows' default connection.",
             Roles = [Role(RoleId.Gaming, _adapters[0], 12, 0), Role(RoleId.Downloads, _adapters[1], 21, 0.4)],
@@ -165,16 +173,42 @@ public sealed class DemoNetRouteClient : INetRouteClient
         return Task.CompletedTask;
     }
 
-    public Task SetEnforcementPausedAsync(bool paused, CancellationToken ct = default)
+    public Task SetEnforcementPausedAsync(bool paused, int? minutes = null, CancellationToken ct = default)
     {
         _paused = paused;
+        _pausedUntil = paused && minutes is > 0 ? DateTimeOffset.UtcNow.AddMinutes(minutes.Value) : null;
         return Task.CompletedTask;
     }
 
     public Task EmergencyDisableAsync(CancellationToken ct = default)
     {
         _paused = true;
+        _pausedUntil = null;
         return Task.CompletedTask;
+    }
+
+    public Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default)
+    {
+        _systemDownloads = enabled;
+        return Task.CompletedTask;
+    }
+
+    public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default)
+    {
+        AppRateDto Rate(string name, int pid, string adapter, double downMb, double upKb, string? path = null) => new()
+        {
+            ProcessId = pid, ProcessName = name, ExecutablePath = path, InterfaceName = adapter,
+            DownBytesPerSecond = downMb * 1024 * 1024, UpBytesPerSecond = upKb * 1024
+        };
+        return Task.FromResult(new AppRatesDto(true, null,
+        [
+            Rate("steam", 4120, "Wi-Fi 2", 11.4, 180),
+            Rate("steamwebhelper", 4188, "Wi-Fi 2", 0.2, 12),
+            Rate("HaloInfinite", 7788, "Ethernet", 0.08, 40, @"G:\SteamLibrary\steamapps\common\Halo Infinite\HaloInfinite.exe"),
+            Rate("Discord", 5021, "Ethernet", 0.02, 8),
+            Rate("OneDrive", 3300, "Ethernet", 2.6, 90, @"C:\Program Files\Microsoft OneDrive\OneDrive.exe"),
+            Rate("brave", 9001, "Wi-Fi 2", 0.4, 20)
+        ]));
     }
 
     public Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default)

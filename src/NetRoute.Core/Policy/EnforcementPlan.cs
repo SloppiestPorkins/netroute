@@ -62,4 +62,7 @@ public sealed record EnforcementPlan
 
     /// <summary>Roles that are configured but whose adapter is currently unusable.</summary>
     public required IReadOnlyList<RoleId> DegradedRoles { get; init; }
+
+    /// <summary>Windows' download services, when they should be kept on Downloads right now.</summary>
+    public SystemDownloadsPlan? SystemDownloads { get; init; }
 }

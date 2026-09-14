@@ -65,6 +65,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string? _serviceProblem;
     [ObservableProperty] private object? _overlay;
     [ObservableProperty] private string? _toast;
+    [ObservableProperty] private string _checkupText = "Check-up";
+    [ObservableProperty] private NewGamePrompt? _newGame;
+    private int _refreshCount;
+    private readonly HashSet<string> _notNow = new(StringComparer.OrdinalIgnoreCase);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PauseText))]
@@ -95,6 +99,10 @@ public partial class MainViewModel : ObservableObject
             ServiceProblem = null;
             Apply(status);
             UpdateRates();
+            if (Page == "Main" && NewGame is null && _refreshCount++ % 5 == 0)
+            {
+                await DetectNewGameAsync();
+            }
             if (Overlay is LiveViewModel live)
             {
                 await live.RefreshAsync();
@@ -133,7 +141,7 @@ public partial class MainViewModel : ObservableObject
         var apps = status.Apps;
         if (status.EnforcementPaused)
         {
-            SetOverall("Paused", "MutedBrush", "NeutralTintBrush");
+            SetOverall(status.PausedUntil is { } until ? $"Paused until {until.ToLocalTime():HH:mm}" : "Paused", "MutedBrush", "NeutralTintBrush");
         }
         else if (!status.EnforcementActive)
         {
@@ -165,6 +173,11 @@ public partial class MainViewModel : ObservableObject
         Banner = banners.Count == 0 ? null : string.Join("\n", banners);
         RouteTieText = status.RouteTie?.Message;
         RedirectText = status.RedirectSummary;
+
+        // The problems the service already knows about. Check-up finds more when opened.
+        var issues = (status.EnforcementPaused ? 1 : 0) + (status.RouteTie is null ? 0 : 1) + (status.RedirectionAvailable ? 0 : 1)
+                     + status.Roles.Count(r => r.Health != RoleHealth.Connected);
+        CheckupText = issues > 0 ? $"Check-up · {issues}" : "Check-up";
 
         SyncRoles(status.Roles);
         SyncApps(apps);
@@ -295,7 +308,8 @@ public partial class MainViewModel : ObservableObject
         }
         foreach (var e in events.Where(e => e.Id > _lastEventId).OrderBy(e => e.Id))
         {
-            if (e.Kind is ServiceEventKind.RoleOffline or ServiceEventKind.RoleRestored or ServiceEventKind.Leak or ServiceEventKind.EmergencyDisabled)
+            if (e.Kind is ServiceEventKind.RoleOffline or ServiceEventKind.RoleRestored or ServiceEventKind.Leak
+                or ServiceEventKind.EmergencyDisabled or ServiceEventKind.Resumed)
             {
                 Notify?.Invoke(e.Title, e.Message);
             }
@@ -375,10 +389,103 @@ public partial class MainViewModel : ObservableObject
         $"NetRoute will stop managing {row.Name}. It will use normal Windows routing.",
         "Remove", () => Run(() => _client.RemoveRuleAsync(row.Id), $"Removed {row.Name}."));
 
+    /// <summary>Resume straight away; pausing asks how long first (see <see cref="PauseViewModel"/>).</summary>
     [RelayCommand]
-    private Task TogglePauseAll() => Run(
-        () => _client.SetEnforcementPausedAsync(!Paused),
-        Paused ? "Protection is back on." : "Protection is paused. Your app list is kept.");
+    private Task TogglePauseAll()
+    {
+        if (Paused)
+        {
+            return Resume();
+        }
+        Overlay = new PauseViewModel(this);
+        return Task.CompletedTask;
+    }
+
+    [RelayCommand]
+    public Task PauseFor(int? minutes) => Run(
+        () => _client.SetEnforcementPausedAsync(true, minutes),
+        minutes is { } m
+            ? $"Protection is paused. It turns back on by itself at {DateTime.Now.AddMinutes(m):HH:mm}."
+            : "Protection is paused until you press Resume. Your app list is kept.");
+
+    [RelayCommand]
+    private Task Resume() => Run(() => _client.SetEnforcementPausedAsync(false), "Protection is back on.");
+
+    [RelayCommand]
+    private Task OpenCheckup() => OpenCheckupAsync();
+
+    public async Task OpenCheckupAsync()
+    {
+        var vm = new HealthViewModel(this);
+        Overlay = vm;
+        await vm.LoadAsync();
+    }
+
+    /// <summary>Offers the installed download apps; closes itself when there's nothing to offer.</summary>
+    public async Task OpenSuggestDownloadsAsync()
+    {
+        var vm = new SuggestDownloadsViewModel(this);
+        Overlay = vm;
+        if (await vm.LoadAsync() == 0 && Overlay == vm)
+        {
+            Overlay = null;
+        }
+    }
+
+    private async Task DetectNewGameAsync()
+    {
+        try
+        {
+            var connections = await _client.GetConnectionsAsync();
+            var ignored = new HashSet<string>(GuiState.Load().IgnoredGames, StringComparer.OrdinalIgnoreCase);
+            ignored.UnionWith(_notNow);
+            if (NewGameDetector.Find(connections, Status?.Apps ?? [], ignored) is { } game)
+            {
+                NewGame = game;
+                Notify?.Invoke("New game detected", game.Message);
+            }
+        }
+        catch (ServiceUnavailableException)
+        {
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task AcceptNewGame()
+    {
+        if (NewGame is not { } game)
+        {
+            return;
+        }
+        NewGame = null;
+        _notNow.Add(game.Root);
+        await Run(() => _client.AddRuleAsync(game.Identity, RoleId.Gaming),
+            $"{game.Name} now uses Gaming. Connections it already has stay where they are until it reconnects.");
+    }
+
+    [RelayCommand]
+    private void DismissNewGame()
+    {
+        if (NewGame is { } game)
+        {
+            _notNow.Add(game.Root);
+        }
+        NewGame = null;
+    }
+
+    [RelayCommand]
+    private void NeverNewGame()
+    {
+        if (NewGame is { } game)
+        {
+            GuiState.Ignore(game.Root);
+        }
+        NewGame = null;
+    }
 
     [RelayCommand]
     private void EmergencyDisable() => Overlay = new ConfirmViewModel(
@@ -623,9 +730,16 @@ public partial class SetupViewModel(MainViewModel main) : ObservableObject
     private bool CanFinish() => Gaming is not null && Downloads is not null;
 
     [RelayCommand(CanExecute = nameof(CanFinish))]
-    private Task Finish() => main.Run(
-        () => main.Client.CompleteSetupAsync(Gaming!.Dto.Luid, Downloads!.Dto.Luid),
-        $"You're ready. Games use {Gaming!.Name}, downloads use {Downloads!.Name}.");
+    private async Task Finish()
+    {
+        await main.Run(
+            () => main.Client.CompleteSetupAsync(Gaming!.Dto.Luid, Downloads!.Dto.Luid),
+            $"You're ready. Games use {Gaming!.Name}, downloads use {Downloads!.Name}.");
+        if (main.Page == "Main")
+        {
+            await main.OpenSuggestDownloadsAsync();
+        }
+    }
 }
 
 /// <summary>Add App (§28, §10): pick a category and an app, then where it should connect.</summary>
@@ -892,23 +1006,47 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
             return;
         }
 
-        var groups = connections
-            .Where(c => c.InterfaceName is not null)
-            .GroupBy(c => c.InterfaceName!)
-            .Select(g =>
+        // Speeds come from a separate measurement (ETW, in the service). Without them the list
+        // still shows who is on which network, just not how fast.
+        AppRatesDto? rates = null;
+        try
+        {
+            rates = await main.Client.GetAppRatesAsync();
+        }
+        catch (Exception ex) when (ex is NetRouteServiceException or ServiceUnavailableException)
+        {
+        }
+        var speeds = rates?.Rates.Where(r => r.InterfaceName is not null).ToList() ?? [];
+
+        static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        var groups = connections.Select(c => c.InterfaceName).Concat(speeds.Select(r => r.InterfaceName))
+            .OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(adapter =>
             {
-                var card = main.Roles.FirstOrDefault(r => string.Equals(r.AdapterName, g.Key, StringComparison.OrdinalIgnoreCase));
-                var items = g.GroupBy(c => c.ProcessName, StringComparer.OrdinalIgnoreCase)
-                    .Select(p => new LiveItem(p.Key, Detail(p.ToList()), p.Count()))
-                    .OrderByDescending(i => i.Count)
+                var sockets = connections.Where(c => Same(c.InterfaceName, adapter)).ToList();
+                var moving = speeds.Where(r => Same(r.InterfaceName, adapter)).ToList();
+                var card = main.Roles.FirstOrDefault(r => Same(r.AdapterName, adapter));
+                var items = sockets.Select(c => c.ProcessName).Concat(moving.Select(r => r.ProcessName))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(name =>
+                    {
+                        var mine = sockets.Where(c => Same(c.ProcessName, name)).ToList();
+                        var rate = moving.Where(r => Same(r.ProcessName, name)).ToList();
+                        return new LiveItem(name, Detail(mine), mine.Count, rate.Sum(r => r.DownBytesPerSecond), rate.Sum(r => r.UpBytesPerSecond));
+                    })
+                    .OrderByDescending(i => i.Down + i.Up)
+                    .ThenByDescending(i => i.Count)
                     .ToList();
                 var subtitle = card is null
                     ? $"{items.Count} app{(items.Count == 1 ? "" : "s")}"
                     : $"{card.Role.DisplayName()} network  ·  ↓ {card.DownRate}  ↑ {card.UpRate}";
-                return new LiveGroup(g.Key, subtitle, card?.RoleBrush ?? Ui.Res("DefaultBrush"), card?.Glyph ?? Ui.Glyph(RoleId.Default),
-                    items.Take(12).ToList(), items.Count > 12 ? $"+ {items.Count - 12} more" : null, g.Count());
+                return new LiveGroup(adapter, subtitle, card?.RoleBrush ?? Ui.Res("DefaultBrush"), card?.Glyph ?? Ui.Glyph(RoleId.Default),
+                    items.Take(12).ToList(), items.Count > 12 ? $"+ {items.Count - 12} more" : null, sockets.Count,
+                    moving.Sum(r => r.DownBytesPerSecond + r.UpBytesPerSecond));
             })
-            .OrderByDescending(g => g.Total)
+            .OrderByDescending(g => g.Speed)
+            .ThenByDescending(g => g.Total)
             .ToList();
 
         Groups.Clear();
@@ -919,9 +1057,16 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
 
         var loose = connections.Count(c => c.InterfaceName is null);
         Empty = groups.Count == 0 ? "No app has network connections right now." : null;
-        Footnote = loose > 0
-            ? $"{loose} more socket{(loose == 1 ? " isn't" : "s aren't")} tied to one network yet (for example UDP that hasn't sent anything), so {(loose == 1 ? "it isn't" : "they aren't")} shown."
-            : null;
+        var notes = new List<string>();
+        if (loose > 0)
+        {
+            notes.Add($"{loose} more socket{(loose == 1 ? " isn't" : "s aren't")} tied to one network yet (for example UDP that hasn't sent anything), so {(loose == 1 ? "it isn't" : "they aren't")} shown.");
+        }
+        if (rates is { Available: false })
+        {
+            notes.Add($"Per-app speeds aren't available: {rates.Problem}");
+        }
+        Footnote = notes.Count == 0 ? null : string.Join("\n", notes);
     }
 
     private static string Detail(List<ConnectionDto> connections)
@@ -935,9 +1080,12 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
     }
 }
 
-public sealed record LiveGroup(string Title, string Subtitle, Brush Accent, string Glyph, IReadOnlyList<LiveItem> Items, string? More, int Total);
+public sealed record LiveGroup(string Title, string Subtitle, Brush Accent, string Glyph, IReadOnlyList<LiveItem> Items, string? More, int Total, double Speed);
 
-public sealed record LiveItem(string Name, string Detail, int Count);
+public sealed record LiveItem(string Name, string Detail, int Count, double Down, double Up)
+{
+    public string Rate => Down + Up >= 1 ? $"↓ {Format.Rate(Down)}   ↑ {Format.Rate(Up)}" : "";
+}
 
 /// <summary>A yes/no question with a destructive action.</summary>
 public partial class ConfirmViewModel(string title, string message, string confirmText, Func<Task> action) : ObservableObject

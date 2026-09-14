@@ -102,7 +102,14 @@ public partial class App : Application
         var open = new Forms.ToolStripMenuItem("Open NetRoute", null, (_, _) => ShowWindow()) { Font = new Drawing.Font(Forms.Control.DefaultFont, Drawing.FontStyle.Bold) };
         var gaming = new Forms.ToolStripMenuItem("Gaming") { Enabled = false };
         var downloads = new Forms.ToolStripMenuItem("Downloads") { Enabled = false };
-        var pause = new Forms.ToolStripMenuItem("Pause protection", null, (_, _) => _vm?.TogglePauseAllCommand.Execute(null));
+        // Pausing asks how long, so protection can't be left off by accident (a pause is saved and
+        // survives restarts). Resume is its own item, shown only while paused.
+        var pause = new Forms.ToolStripMenuItem("Pause protection");
+        foreach (var (label, minutes) in new (string, int?)[] { ("For 15 minutes", 15), ("For 1 hour", 60), ("For 3 hours", 180), ("Until I turn it back on", null) })
+        {
+            pause.DropDownItems.Add(label, null, (_, _) => _vm?.PauseForCommand.Execute(minutes));
+        }
+        var resume = new Forms.ToolStripMenuItem("Resume protection", null, (_, _) => _vm?.ResumeCommand.Execute(null));
         var emergency = new Forms.ToolStripMenuItem("Emergency Disable…", null, (_, _) =>
         {
             ShowWindow();
@@ -118,13 +125,16 @@ public partial class App : Application
             Shutdown();
         });
 
-        menu.Items.AddRange([open, new Forms.ToolStripSeparator(), gaming, downloads, new Forms.ToolStripSeparator(), pause, emergency, new Forms.ToolStripSeparator(), exit]);
+        menu.Items.AddRange([open, new Forms.ToolStripSeparator(), gaming, downloads, new Forms.ToolStripSeparator(), pause, resume, emergency, new Forms.ToolStripSeparator(), exit]);
         menu.Opening += (_, _) =>
         {
             var roles = _vm?.Roles;
             gaming.Text = "🎮 Gaming: " + (roles?.FirstOrDefault(r => r.Role == Core.Policy.RoleId.Gaming) is { } g ? $"{g.AdapterName} ({g.HealthText})" : "not set");
             downloads.Text = "⬇ Downloads: " + (roles?.FirstOrDefault(r => r.Role == Core.Policy.RoleId.Downloads) is { } d ? $"{d.AdapterName} ({d.HealthText})" : "not set");
-            pause.Text = _vm?.Paused == true ? "Resume protection" : "Pause protection";
+            pause.Visible = _vm?.Paused != true;
+            resume.Visible = _vm?.Paused == true;
+            resume.Text = _vm?.OverallText is { } text && text.StartsWith("Paused until", StringComparison.Ordinal)
+                ? $"Resume protection ({text.ToLowerInvariant()})" : "Resume protection";
         };
 
         _tray = new Forms.NotifyIcon
@@ -135,10 +145,42 @@ public partial class App : Application
             ContextMenuStrip = menu
         };
         _tray.DoubleClick += (_, _) => ShowWindow();
+
+        if (_vm is not null)
+        {
+            _vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.Paused))
+                {
+                    UpdateTrayIcon();
+                }
+            };
+        }
     }
 
+    /// <summary>Greys the icon and adds pause bars while paused, so a forgotten pause is visible at a glance.</summary>
+    private void UpdateTrayIcon()
+    {
+        if (_tray is null)
+        {
+            return;
+        }
+        var paused = _vm?.Paused == true;
+        var old = _tray.Icon;
+        _tray.Icon = MakeTrayIcon(paused);
+        _tray.Text = paused ? "NetRoute (paused)" : "NetRoute";
+        if (old is not null)
+        {
+            DestroyIcon(old.Handle);
+            old.Dispose();
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr handle);
+
     /// <summary>A small rounded tile with two routes, drawn at runtime so there's no binary asset to ship.</summary>
-    private static Drawing.Icon MakeTrayIcon()
+    private static Drawing.Icon MakeTrayIcon(bool paused = false)
     {
         using var bitmap = new Drawing.Bitmap(32, 32);
         using (var g = Drawing.Graphics.FromImage(bitmap))
@@ -146,10 +188,17 @@ public partial class App : Application
             g.SmoothingMode = Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using var tile = new Drawing.SolidBrush(Drawing.Color.FromArgb(0x1F, 0x23, 0x2C));
             g.FillEllipse(tile, 1, 1, 30, 30);
-            using var green = new Drawing.Pen(Drawing.Color.FromArgb(0x22, 0xC5, 0x5E), 3.2f) { StartCap = Drawing.Drawing2D.LineCap.Round, EndCap = Drawing.Drawing2D.LineCap.Round };
-            using var blue = new Drawing.Pen(Drawing.Color.FromArgb(0x4F, 0x8D, 0xF7), 3.2f) { StartCap = Drawing.Drawing2D.LineCap.Round, EndCap = Drawing.Drawing2D.LineCap.Round };
+            var grey = Drawing.Color.FromArgb(0x7A, 0x80, 0x8C);
+            using var green = new Drawing.Pen(paused ? grey : Drawing.Color.FromArgb(0x22, 0xC5, 0x5E), 3.2f) { StartCap = Drawing.Drawing2D.LineCap.Round, EndCap = Drawing.Drawing2D.LineCap.Round };
+            using var blue = new Drawing.Pen(paused ? grey : Drawing.Color.FromArgb(0x4F, 0x8D, 0xF7), 3.2f) { StartCap = Drawing.Drawing2D.LineCap.Round, EndCap = Drawing.Drawing2D.LineCap.Round };
             g.DrawBezier(green, 8, 24, 12, 24, 14, 10, 24, 9);
             g.DrawBezier(blue, 8, 24, 16, 24, 18, 22, 24, 23);
+            if (paused)
+            {
+                using var bars = new Drawing.SolidBrush(Drawing.Color.FromArgb(0xF5, 0xA5, 0x24));
+                g.FillRectangle(bars, 19, 2, 4, 11);
+                g.FillRectangle(bars, 25, 2, 4, 11);
+            }
         }
         return Drawing.Icon.FromHandle(bitmap.GetHicon());
     }

@@ -21,7 +21,9 @@ public sealed class NamedPipeNetRouteClient(string? pipeName = null) : INetRoute
     public Task UpdateRuleAsync(AppRule rule, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.UpdateRule, new UpdateRuleRequest(rule), ct);
     public Task RemoveRuleAsync(Guid ruleId, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.RemoveRule, new RuleIdRequest(ruleId), ct);
     public Task SetRulePausedAsync(Guid ruleId, bool paused, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetRulePaused, new SetRulePausedRequest(ruleId, paused), ct);
-    public Task SetEnforcementPausedAsync(bool paused, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetEnforcementPaused, new SetPausedRequest(paused), ct);
+    public Task SetEnforcementPausedAsync(bool paused, int? minutes = null, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetEnforcementPaused, new SetPausedRequest(paused, minutes), ct);
+    public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default) => CallAsync<AppRatesDto>(IpcCommands.GetAppRates, null, ct);
+    public Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetSystemDownloads, new SetSystemDownloadsRequest(enabled), ct);
     public Task EmergencyDisableAsync(CancellationToken ct = default) => CallAsync<object?>(IpcCommands.EmergencyDisable, null, ct);
     public Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default) => CallAsync<RouteFixResultDto>(IpcCommands.FixRouteTie, null, ct);
 

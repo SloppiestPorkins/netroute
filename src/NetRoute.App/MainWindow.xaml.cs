@@ -82,6 +82,15 @@ public partial class MainWindow : Window
             case "emergency":
                 _vm.EmergencyDisableCommand.Execute(null);
                 break;
+            case "checkup":
+                await _vm.OpenCheckupAsync();
+                break;
+            case "pause":
+                _vm.TogglePauseAllCommand.Execute(null);
+                break;
+            case "suggest":
+                await _vm.OpenSuggestDownloadsAsync();
+                break;
         }
 
         await Task.Delay(600);

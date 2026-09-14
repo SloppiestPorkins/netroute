@@ -18,7 +18,10 @@ public sealed record RuleIdRequest(Guid RuleId);
 
 public sealed record SetRulePausedRequest(Guid RuleId, bool Paused);
 
-public sealed record SetPausedRequest(bool Paused);
+/// <summary>Pause or resume. With <paramref name="Minutes"/>, the pause ends by itself.</summary>
+public sealed record SetPausedRequest(bool Paused, int? Minutes = null);
+
+public sealed record SetSystemDownloadsRequest(bool Enabled);
 
 // ---- Responses ----
 
@@ -126,7 +129,8 @@ public enum ServiceEventKind
     RoleChanged,
     Leak,
     EnforcementError,
-    EmergencyDisabled
+    EmergencyDisabled,
+    Resumed
 }
 
 /// <summary>Something worth telling the user about, e.g. "Gaming restored" (§18, §40).</summary>
@@ -148,6 +152,12 @@ public sealed record ServiceStatusDto
     public required bool EnforcementActive { get; init; }
 
     public required bool EnforcementPaused { get; init; }
+
+    /// <summary>When a timed pause ends. Null when not paused or paused until resumed.</summary>
+    public DateTimeOffset? PausedUntil { get; init; }
+
+    /// <summary>Whether Windows Update, Store and Xbox downloads are kept on Downloads.</summary>
+    public SystemDownloadsDto? SystemDownloads { get; init; }
 
     /// <summary>
     /// The bind-redirect driver is loaded. Without it NetRoute can block but not move
@@ -177,6 +187,27 @@ public sealed record ServiceStatusDto
 public sealed record RouteTieDto(IReadOnlyList<string> AdapterNames, string Message);
 
 public sealed record RouteFixResultDto(bool Fixed, string Message);
+
+/// <param name="Enabled">The user's setting.</param>
+/// <param name="Active">Filters are in place right now.</param>
+/// <param name="Summary">One sentence for the user.</param>
+public sealed record SystemDownloadsDto(bool Enabled, bool Active, string Summary);
+
+/// <summary>How fast one program is moving data through one network, measured by the service.</summary>
+public sealed record AppRateDto
+{
+    public required int ProcessId { get; init; }
+    public required string ProcessName { get; init; }
+    public string? ExecutablePath { get; init; }
+    public string? PackageFamilyName { get; init; }
+    public ulong? InterfaceLuid { get; init; }
+    public string? InterfaceName { get; init; }
+    public required double DownBytesPerSecond { get; init; }
+    public required double UpBytesPerSecond { get; init; }
+}
+
+/// <param name="Available">False when the service couldn't start measuring; <paramref name="Problem"/> says why.</param>
+public sealed record AppRatesDto(bool Available, string? Problem, IReadOnlyList<AppRateDto> Rates);
 
 /// <summary>Result of changing which adapter a role points at (§38).</summary>
 public sealed record RoleChangeResultDto(RoleId Role, string AdapterName, int AffectedApps, string Message);

@@ -45,7 +45,10 @@ public sealed class NetRouteEngine : IDisposable
     private readonly IAppVerifier _verifier;
     private readonly IConnectionSource _connections;
     private readonly IDefaultRouteSource _routes;
+    private readonly ILinkQualitySource _links;
+    private readonly IAppRateSource _rates;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private string? _systemDownloadsError;
     private readonly List<ServiceEventDto> _events = [];
     private Dictionary<RoleId, RoleHealth> _roleHealth = [];
     private Dictionary<Guid, IpcError> _ruleErrors = [];
@@ -63,8 +66,12 @@ public sealed class NetRouteEngine : IDisposable
         IAppVerifier? verifier = null,
         IConnectionSource? connections = null,
         IPolicyPlanResolver? resolver = null,
-        IDefaultRouteSource? routes = null)
+        IDefaultRouteSource? routes = null,
+        ILinkQualitySource? links = null,
+        IAppRateSource? rates = null)
     {
+        _links = links ?? new NoLinkQuality();
+        _rates = rates ?? new NoAppRates();
         _store = new ConfigStore(configPath);
         _adapters = adapters;
         _backend = backend;
@@ -77,7 +84,18 @@ public sealed class NetRouteEngine : IDisposable
     public async Task ReconcileAsync(CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct);
-        try { ReconcileLocked(_store.Load()); }
+        try
+        {
+            var config = _store.Load();
+            if (config.EnforcementPaused && config.PausedUntil is { } until && until <= DateTimeOffset.UtcNow)
+            {
+                config = config with { EnforcementPaused = false, PausedUntil = null };
+                _store.Save(config);
+                AddEvent(ServiceEventKind.Resumed, "Protection is back on",
+                    "The pause ended, so NetRoute is keeping your apps on their networks again.");
+            }
+            ReconcileLocked(config);
+        }
         finally { _gate.Release(); }
     }
 
@@ -97,6 +115,8 @@ public sealed class NetRouteEngine : IDisposable
                 SetupCompleted = config.SetupCompleted,
                 EnforcementActive = _backend.IsAvailable && !config.EnforcementPaused && _ruleErrors.Count == 0,
                 EnforcementPaused = config.EnforcementPaused,
+                PausedUntil = config.EnforcementPaused ? config.PausedUntil : null,
+                SystemDownloads = DescribeSystemDownloads(config),
                 RedirectionAvailable = _backend.RedirectionAvailable,
                 RedirectSummary = _redirectSummary,
                 Roles = BuildRoles(config, adapters),
@@ -174,8 +194,18 @@ public sealed class NetRouteEngine : IDisposable
         return config with { AppRules = config.AppRules.Select(r => r.Id == ruleId ? r with { Paused = paused } : r).ToList() };
     }, ct);
 
-    public Task SetEnforcementPausedAsync(bool paused, CancellationToken ct = default)
-        => MutateAsync(config => config with { EnforcementPaused = paused }, ct);
+    public Task SetEnforcementPausedAsync(bool paused, int? minutes = null, CancellationToken ct = default)
+        => MutateAsync(config => config with
+        {
+            EnforcementPaused = paused,
+            PausedUntil = paused && minutes is > 0 ? DateTimeOffset.UtcNow.AddMinutes(minutes.Value) : null
+        }, ct);
+
+    public Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default)
+        => MutateAsync(config => config with { RouteSystemDownloads = enabled }, ct);
+
+    /// <summary>Not under the gate: the meter has its own lock and nothing here touches config.</summary>
+    public AppRatesDto GetAppRates() => _rates.GetRates();
 
     public async Task EmergencyDisableAsync(CancellationToken ct = default)
     {
@@ -184,13 +214,32 @@ public sealed class NetRouteEngine : IDisposable
         {
             // Filter removal must not depend on readable config or a working resolver.
             _backend.EmergencyDisable();
-            var config = _store.Load() with { EnforcementPaused = true };
+            var config = _store.Load() with { EnforcementPaused = true, PausedUntil = null };
             _store.Save(config);
             _fingerprint = null;
             _redirectSummary = "Off. Emergency Disable restored normal Windows networking.";
             AddEvent(ServiceEventKind.EmergencyDisabled, "Emergency disable", "All NetRoute enforcement was disabled.");
         }
         finally { _gate.Release(); }
+    }
+
+    private SystemDownloadsDto DescribeSystemDownloads(NetRouteConfig config)
+    {
+        const string what = "Windows Update, Microsoft Store and Xbox app downloads";
+        if (!config.RouteSystemDownloads)
+        {
+            return new(false, false, $"Off. {what} use whichever connection Windows picks.");
+        }
+        if (_plan?.SystemDownloads is not { } system)
+        {
+            return new(true, false, $"On, waiting: {what} are kept on Downloads while protection is on and Downloads is connected.");
+        }
+        if (_systemDownloadsError is { } error)
+        {
+            return new(true, false, $"On, but it couldn't be applied: {error}");
+        }
+        return new(true, true, $"On. {what} are kept on {system.Adapter.Name}" +
+                               (system.BlockIpv6 ? $", with IPv6 blocked because {system.Adapter.Name} has none." : "."));
     }
 
     public async Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default)
@@ -265,6 +314,7 @@ public sealed class NetRouteEngine : IDisposable
         {
             var result = _backend.Apply(plan);
             _ruleErrors = result.Failures.ToDictionary(f => f.RuleId, f => ToError(f.Error));
+            _systemDownloadsError = result.SystemDownloadsError;
             _policyAppliedAt = DateTimeOffset.UtcNow;
             _fingerprint = fingerprint;
         }
@@ -310,10 +360,12 @@ public sealed class NetRouteEngine : IDisposable
         {
             var binding = config.BindingFor(role);
             var adapter = binding is null ? null : adapters.FirstOrDefault(a => a.Luid == binding.AdapterLuid);
+            var quality = adapter is null ? null : _links.For(adapter.Luid);
             return new RoleStatusDto
             {
                 Role = role, Adapter = adapter is null ? null : AdapterDto.From(adapter), LastKnownName = binding?.LastKnownName,
-                Health = Health(binding, adapters), LatencyMs = null,
+                Health = Health(binding, adapters), LatencyMs = quality?.LatencyMs, PacketLossPercent = quality?.LossPercent,
+                InternetReachable = quality?.Reachable,
                 AssignedApps = config.AppRules.Count(r => r.Role == role), Ipv4Only = adapter?.IsIpv4Only ?? false
             };
         }).ToList();
@@ -345,6 +397,9 @@ public sealed class NetRouteEngine : IDisposable
             a.Rule.Id, a.Rule.App.ExecutablePath, a.Action, a.ResolvedAdapter?.Luid, a.ResolvedAdapter?.Ipv4Address, a.ResolvedAdapter?.Ipv6Address,
             a.BlockIpv6, a.Rule.Mode, a.Rule.KillSwitch, a.Rule.EnforceIpv4, a.Rule.EnforceIpv6,
             a.Rule.EnforceTcp, a.Rule.EnforceUdp, a.Rule.Paused, a.Rule.IncludeRelatedProcesses)));
+        text += plan.SystemDownloads is { } system
+            ? $"\nsystem|{system.Adapter.Luid}|{system.BlockIpv6}|{string.Join(',', system.Services)}"
+            : "\nsystem|off";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 

@@ -13,7 +13,8 @@ const string Usage = """
           move <app> <network>           change an app's network
           remove <app>                   stop routing an app
           apps | roles | why <app>       details
-          pause | resume                 stop or restart enforcement, keeping your rules
+          pause [minutes] | resume       stop or restart enforcement, keeping your rules
+          system-downloads on|off        keep Windows Update, Store and Xbox downloads on Downloads
           emergency-disable              remove every NetRoute rule from Windows right now
           fix-routes                     give Windows one default connection when two are tied
         """;
@@ -35,7 +36,24 @@ static async Task<int> RunAsync(string[] args)
             case "roles": PrintRoles((await client.GetStatusAsync()).Roles); break;
             case "apps": PrintApps((await client.GetStatusAsync()).Apps); break;
             case "why" when args.Length > 1: return PrintWhy(await client.GetStatusAsync(), string.Join(' ', args.Skip(1)));
-            case "pause": await client.SetEnforcementPausedAsync(true); Console.WriteLine("NetRoute enforcement paused."); break;
+            case "pause":
+            {
+                int? minutes = args.Length > 1 && int.TryParse(args[1], out var m) && m > 0 ? m : null;
+                await client.SetEnforcementPausedAsync(true, minutes);
+                Console.WriteLine(minutes is { } mins
+                    ? $"NetRoute enforcement paused for {mins} minutes. It turns back on by itself."
+                    : "NetRoute enforcement paused until you run 'netroute resume'.");
+                break;
+            }
+            case "system-downloads" when args.Length > 1 && args[1] is "on" or "off":
+            {
+                var on = args[1] == "on";
+                await client.SetSystemDownloadsAsync(on);
+                Console.WriteLine(on
+                    ? "Windows Update, Store and Xbox downloads now use Downloads."
+                    : "Windows Update, Store and Xbox downloads now follow Windows' default connection.");
+                break;
+            }
             case "resume": await client.SetEnforcementPausedAsync(false); Console.WriteLine("NetRoute enforcement resumed."); break;
             case "emergency-disable": await client.EmergencyDisableAsync(); Console.WriteLine("All NetRoute filters removed and enforcement paused."); break;
             case "adapters": PrintAdapters(await client.GetAdaptersAsync()); break;
@@ -207,7 +225,10 @@ static async Task<AppIdentity?> ResolveAppAsync(string target)
 
 static void PrintStatus(ServiceStatusDto status)
 {
-    Console.WriteLine(status.EnforcementPaused ? "Enforcement: paused" : status.EnforcementActive ? "Enforcement: active" : "Enforcement: unavailable");
+    Console.WriteLine(status.EnforcementPaused
+        ? status.PausedUntil is { } until ? $"Enforcement: paused until {until.ToLocalTime():HH:mm}" : "Enforcement: paused"
+        : status.EnforcementActive ? "Enforcement: active" : "Enforcement: unavailable");
+    if (status.SystemDownloads is { } system) Console.WriteLine($"Windows downloads: {system.Summary}");
     if (status.LastError is { } error) Console.WriteLine($"Problem: {error.FriendlyMessage}");
     if (status.RedirectSummary is { } redirect) Console.WriteLine($"Moving apps: {redirect}");
     if (status.RouteTie is { } tie) Console.WriteLine($"Problem: {tie.Message} Run 'netroute fix-routes' to fix it.");

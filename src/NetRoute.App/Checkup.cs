@@ -1,0 +1,457 @@
+using System.Collections.ObjectModel;
+using System.Text.Json;
+using System.Windows.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using NetRoute.Core.Policy;
+using NetRoute.Ipc;
+using NetRoute.Windows.Apps;
+
+namespace NetRoute.App;
+
+public enum HealthLevel
+{
+    Problem,
+    Tip,
+    Fine
+}
+
+/// <summary>One line of the Check-up, with the one-click fix when there is one.</summary>
+public sealed record HealthItem(HealthLevel Level, string Title, string? Detail, string? FixText, Func<Task>? Fix)
+{
+    public static HealthItem Problem(string title, string? detail, string? fixText = null, Func<Task>? fix = null) => new(HealthLevel.Problem, title, detail, fix is null ? null : fixText, fix);
+    public static HealthItem Tip(string title, string? detail, string? fixText = null, Func<Task>? fix = null) => new(HealthLevel.Tip, title, detail, fix is null ? null : fixText, fix);
+    public static HealthItem Fine(string title, string? detail, string? fixText = null, Func<Task>? fix = null) => new(HealthLevel.Fine, title, detail, fix is null ? null : fixText, fix);
+
+    public string Glyph => Level switch { HealthLevel.Problem => "", HealthLevel.Tip => "", _ => "" };
+    public Brush Brush => Ui.Res(Level switch { HealthLevel.Problem => "WarnBrush", HealthLevel.Tip => "DownloadsBrush", _ => "GoodBrush" });
+}
+
+/// <summary>
+/// Check-up: everything that decides where traffic actually goes, in one place, each problem
+/// with its fix. It exists because the things that went wrong in practice (protection left
+/// paused, two default connections, Steam never added) were each visible somewhere, but
+/// nowhere put them together.
+/// </summary>
+public partial class HealthViewModel(MainViewModel main) : ObservableObject
+{
+    /// <summary>What counts as "busy" on the Gaming connection: 1 MB/s either way.</summary>
+    private const double BusyBytesPerSecond = 1024 * 1024;
+
+    public ObservableCollection<HealthItem> Items { get; } = [];
+
+    [ObservableProperty] private string _summary = "Checking…";
+
+    public async Task LoadAsync()
+    {
+        Summary = "Checking…";
+        var status = main.Status;
+        if (status is null)
+        {
+            Items.Clear();
+            Summary = "The NetRoute service isn't answering, so nothing can be checked.";
+            return;
+        }
+
+        var client = main.Client;
+        var items = new List<HealthItem>();
+
+        if (status.EnforcementPaused)
+        {
+            items.Add(HealthItem.Problem("Protection is paused",
+                (status.PausedUntil is { } until ? $"It turns back on by itself at {until.ToLocalTime():HH:mm}. " : "It stays off until you turn it back on. ") +
+                "Until then every app uses normal Windows routing, so downloads can land on your Gaming connection.",
+                "Resume", () => main.Run(() => client.SetEnforcementPausedAsync(false), "Protection is back on.")));
+        }
+
+        if (status.RouteTie is { } tie)
+        {
+            items.Add(HealthItem.Problem("Windows has two default connections", tie.Message, "Fix it", () => main.FixRouteTieCommand.ExecuteAsync(null)));
+        }
+
+        if (!status.RedirectionAvailable)
+        {
+            items.Add(HealthItem.Problem("NetRoute can't move apps onto another connection",
+                "The split-tunnel driver isn't running, so NetRoute can keep apps off the wrong network but can't move them. " +
+                "Run RUN-NETROUTE-SETUP.cmd as administrator to fix this."));
+        }
+
+        foreach (var role in status.Roles.Where(r => r.Health != RoleHealth.Connected))
+        {
+            var name = role.Adapter?.Name ?? role.LastKnownName ?? "no network";
+            var what = role.Health switch
+            {
+                RoleHealth.Unassigned => "hasn't been chosen",
+                RoleHealth.Missing => $"is {name}, which isn't there right now",
+                RoleHealth.NoInternet => $"is {name}, which has no internet",
+                _ => $"is {name}, which is offline"
+            };
+            items.Add(HealthItem.Problem($"Your {role.Role.DisplayName()} network {what}",
+                role.AssignedApps > 0 ? $"{role.AssignedApps} app(s) set to {role.Role.DisplayName()} are blocked until it's back, so they can't fall onto the other connection." : null,
+                "Choose a network", () =>
+                {
+                    main.Overlay = new AdapterPickerViewModel(main, role.Role);
+                    return Task.CompletedTask;
+                }));
+        }
+
+        // Download apps: installed but not routed, or routed to the wrong place.
+        IReadOnlyList<InstalledApp> installed = [];
+        try
+        {
+            installed = await Task.Run(() => new Win32AppDiscovery().Discover());
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+        foreach (var launcher in DownloadApps.Installed(installed))
+        {
+            var rule = status.Apps.FirstOrDefault(a => DownloadApps.SameProgram(a.Rule.App, launcher.Identity));
+            if (rule is null)
+            {
+                items.Add(HealthItem.Problem($"{launcher.DisplayName} isn't in your apps",
+                    "Its downloads follow Windows' default connection, and over IPv6 they can still reach your Gaming connection.",
+                    "Put on Downloads", () => main.Run(
+                        () => client.AddRuleAsync(launcher.Identity with { InstallLocation = launcher.InstallLocation }, RoleId.Downloads),
+                        $"{launcher.DisplayName} now uses Downloads.")));
+            }
+            else if (rule.Rule.Role != RoleId.Downloads)
+            {
+                items.Add(HealthItem.Problem($"{launcher.DisplayName} is on {rule.Rule.Role.DisplayName()}",
+                    "Its game downloads and updates use that connection.", "Move to Downloads", () => MoveToDownloads(rule)));
+            }
+        }
+
+        foreach (var browser in status.Apps.Where(a => a.Rule.Role == RoleId.Gaming && a.Rule.App.ExecutablePath is { } p
+                                                      && Win32AppDiscovery.CategoryOf(p) == AppCategory.Browser))
+        {
+            items.Add(HealthItem.Tip($"{browser.Rule.App.DisplayName} is on Gaming",
+                "Anything you download in it uses your Gaming connection. Move it if you'd rather keep browsing off that line.",
+                "Move to Downloads", () => MoveToDownloads(browser)));
+        }
+
+        if (status.SystemDownloads is { } system)
+        {
+            if (!system.Enabled)
+            {
+                items.Add(HealthItem.Tip("Windows and Xbox downloads can use either connection", system.Summary,
+                    "Keep them on Downloads", () => main.Run(() => client.SetSystemDownloadsAsync(true), "Windows Update, Store and Xbox downloads now use Downloads.")));
+            }
+            else if (system.Active)
+            {
+                items.Add(HealthItem.Fine("Windows and Xbox downloads use Downloads", system.Summary,
+                    "Turn off", () => main.Run(() => client.SetSystemDownloadsAsync(false), "Windows and Xbox downloads now follow Windows' default connection.")));
+            }
+            else if (!status.EnforcementPaused)
+            {
+                items.Add(HealthItem.Problem("Windows and Xbox downloads aren't being kept on Downloads", system.Summary));
+            }
+        }
+
+        await AddGamingLineChecks(status, items);
+
+        var ordered = items.OrderBy(i => i.Level).ToList();
+        if (ordered.All(i => i.Level != HealthLevel.Problem))
+        {
+            ordered.Insert(0, HealthItem.Fine("Everything that affects your routing looks right", null));
+        }
+
+        Items.Clear();
+        foreach (var item in ordered)
+        {
+            Items.Add(item);
+        }
+        var problems = ordered.Count(i => i.Level == HealthLevel.Problem);
+        Summary = problems switch
+        {
+            0 => "No problems found. Tips below are optional.",
+            1 => "1 thing needs fixing. Each fix is one click.",
+            _ => $"{problems} things need fixing. Each fix is one click."
+        };
+    }
+
+    /// <summary>
+    /// Anything moving a lot of data on the Gaming connection that isn't a Gaming app. This is
+    /// what actually hurts a game (a big download on its line), and it's measured, not guessed.
+    /// </summary>
+    private async Task AddGamingLineChecks(ServiceStatusDto status, List<HealthItem> items)
+    {
+        var gaming = status.Roles.FirstOrDefault(r => r.Role == RoleId.Gaming)?.Adapter?.Name;
+        if (gaming is null)
+        {
+            return;
+        }
+
+        AppRatesDto? rates;
+        try
+        {
+            // The first reading after the service starts has nothing to compare against yet.
+            rates = await main.Client.GetAppRatesAsync();
+            if (rates.Available && rates.Rates.Count == 0)
+            {
+                await Task.Delay(1200);
+                rates = await main.Client.GetAppRatesAsync();
+            }
+        }
+        catch (Exception ex) when (ex is NetRouteServiceException or ServiceUnavailableException)
+        {
+            return;
+        }
+
+        if (!rates.Available)
+        {
+            items.Add(HealthItem.Tip("Per-app speeds aren't available", rates.Problem ?? "NetRoute couldn't start measuring traffic per app."));
+            return;
+        }
+
+        var playing = status.Apps.FirstOrDefault(a => a.Rule.Role == RoleId.Gaming && a.ActiveConnections > 0)?.Rule.App.DisplayName;
+        var busy = rates.Rates
+            .Where(r => string.Equals(r.InterfaceName, gaming, StringComparison.OrdinalIgnoreCase))
+            .Where(r => !status.Apps.Any(a => a.Rule.Role == RoleId.Gaming && AppMatch.Covers(a.Rule.App, r.ExecutablePath, r.PackageFamilyName)))
+            .GroupBy(r => r.ExecutablePath ?? r.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Rate: g.First(), Speed: g.Sum(r => r.DownBytesPerSecond + r.UpBytesPerSecond)))
+            .Where(x => x.Speed >= BusyBytesPerSecond)
+            .OrderByDescending(x => x.Speed)
+            .Take(3);
+
+        foreach (var (rate, speed) in busy)
+        {
+            var detail = $"It's using {Format.Rate(speed)} of your Gaming connection" + (playing is null ? "." : $" while {playing} is running.");
+            if (rate.ExecutablePath is null || IsWindowsComponent(rate.ExecutablePath))
+            {
+                var systemOn = status.SystemDownloads?.Enabled == true;
+                items.Add(HealthItem.Problem($"Windows ({rate.ProcessName}) is busy on your Gaming connection",
+                    detail + (systemOn ? "" : " Keeping Windows downloads on Downloads would move most of this."),
+                    "Keep Windows downloads on Downloads",
+                    systemOn ? null : () => main.Run(() => main.Client.SetSystemDownloadsAsync(true), "Windows Update, Store and Xbox downloads now use Downloads.")));
+                continue;
+            }
+
+            var existing = status.Apps.FirstOrDefault(a => AppMatch.Covers(a.Rule.App, rate.ExecutablePath, rate.PackageFamilyName));
+            var name = existing?.Rule.App.DisplayName ?? rate.ProcessName;
+            items.Add(HealthItem.Problem($"{name} is busy on your Gaming connection", detail, "Move to Downloads",
+                existing is not null
+                    ? () => MoveToDownloads(existing)
+                    : () => main.Run(() => main.Client.AddRuleAsync(IdentityOf(rate, name), RoleId.Downloads), $"{name} now uses Downloads.")));
+        }
+    }
+
+    [RelayCommand]
+    private async Task Fix(HealthItem item)
+    {
+        if (item.Fix is null)
+        {
+            return;
+        }
+        await item.Fix();
+        if (main.Overlay == this)
+        {
+            await LoadAsync();
+        }
+    }
+
+    [RelayCommand]
+    private Task Recheck() => LoadAsync();
+
+    private Task MoveToDownloads(AppStatusDto app) => main.Run(
+        () => main.Client.UpdateRuleAsync(app.Rule with { Role = RoleId.Downloads, Mode = RoutingMode.Strict }),
+        $"{app.Rule.App.DisplayName} now uses Downloads.");
+
+    private static AppIdentity IdentityOf(AppRateDto rate, string name)
+        => rate.PackageFamilyName is { } package ? AppIdentity.ForPackage(package, name) : AppIdentity.ForExecutable(rate.ExecutablePath!, name);
+
+    private static bool IsWindowsComponent(string path)
+        => path.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>Whether a rule covers a running program: same file, inside the rule's install folder, or the same package.</summary>
+public static class AppMatch
+{
+    public static bool Covers(AppIdentity rule, string? path, string? package)
+    {
+        if (rule.Kind == AppIdentityKind.Packaged)
+        {
+            return package is not null && string.Equals(rule.PackageFamilyName, package, StringComparison.OrdinalIgnoreCase);
+        }
+        if (path is null)
+        {
+            return false;
+        }
+        return string.Equals(rule.ExecutablePath, path, StringComparison.OrdinalIgnoreCase)
+               || (rule.InstallLocation is { Length: > 0 } root && path.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase));
+    }
+}
+
+/// <summary>Game launchers and stores: the apps whose whole job is downloading.</summary>
+public static class DownloadApps
+{
+    public static IReadOnlyList<InstalledApp> Installed(IEnumerable<InstalledApp> apps) => apps
+        .Where(a => a.Category == AppCategory.Launcher && a.Identity.ExecutablePath is not null)
+        .GroupBy(a => a.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+        .Select(g => g.First())
+        .OrderBy(a => a.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+        .ToList();
+
+    /// <summary>Launchers are matched by file name, so a rule still counts after Steam moves drives.</summary>
+    public static bool SameProgram(AppIdentity rule, AppIdentity app)
+        => rule.ExecutablePath is { } a && app.ExecutablePath is { } b
+           && string.Equals(System.IO.Path.GetFileName(a), System.IO.Path.GetFileName(b), StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>"Pause protection" asks how long, so it can't be left off by accident.</summary>
+public partial class PauseViewModel(MainViewModel main) : ObservableObject
+{
+    public IReadOnlyList<PauseChoice> Choices { get; } =
+    [
+        new("15 minutes", 15), new("1 hour", 60), new("3 hours", 180), new("Until I turn it back on", null)
+    ];
+
+    [RelayCommand]
+    private async Task Choose(PauseChoice choice)
+    {
+        main.Overlay = null;
+        await main.PauseFor(choice.Minutes);
+    }
+}
+
+public sealed record PauseChoice(string Title, int? Minutes)
+{
+    public string Subtitle => Minutes is { } m ? $"Back on by itself at {DateTime.Now.AddMinutes(m):HH:mm}" : "Stays off until you press Resume";
+}
+
+/// <summary>Straight after setup: the download apps on this PC, ready to put on Downloads in one click.</summary>
+public partial class SuggestDownloadsViewModel(MainViewModel main) : ObservableObject
+{
+    public ObservableCollection<SuggestItem> Items { get; } = [];
+
+    [ObservableProperty] private bool _loading = true;
+
+    public async Task<int> LoadAsync()
+    {
+        IReadOnlyList<InstalledApp> installed = [];
+        try
+        {
+            installed = await Task.Run(() => new Win32AppDiscovery().Discover());
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+        var apps = main.Status?.Apps ?? [];
+        foreach (var app in DownloadApps.Installed(installed).Where(l => !apps.Any(r => DownloadApps.SameProgram(r.Rule.App, l.Identity))))
+        {
+            Items.Add(new SuggestItem(app));
+        }
+        Loading = false;
+        return Items.Count;
+    }
+
+    [RelayCommand]
+    private async Task AddSelected()
+    {
+        main.Overlay = null;
+        var chosen = Items.Where(i => i.IsSelected).ToList();
+        if (chosen.Count == 0)
+        {
+            return;
+        }
+        await main.Run(async () =>
+        {
+            foreach (var item in chosen)
+            {
+                await main.Client.AddRuleAsync(item.App.Identity with { InstallLocation = item.App.InstallLocation }, RoleId.Downloads);
+            }
+        }, $"{string.Join(", ", chosen.Select(c => c.Name))} now use{(chosen.Count == 1 ? "s" : "")} Downloads.");
+    }
+}
+
+public partial class SuggestItem(InstalledApp app) : ObservableObject
+{
+    public InstalledApp App { get; } = app;
+    public string Name => App.DisplayName;
+    public string Subtitle => App.IsRunning ? "Running now" : "Installed";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CheckGlyph))]
+    private bool _isSelected = true;
+
+    public string CheckGlyph => IsSelected ? "" : "";
+
+    [RelayCommand]
+    private void Toggle() => IsSelected = !IsSelected;
+}
+
+/// <summary>A game that is online right now and isn't in the user's list.</summary>
+public sealed record NewGamePrompt(string Name, string Root, AppIdentity Identity)
+{
+    public string Message => $"{Name} is running and isn't in your apps. Put it on Gaming?";
+}
+
+public static class NewGameDetector
+{
+    public static NewGamePrompt? Find(IEnumerable<ConnectionDto> connections, IReadOnlyList<AppStatusDto> apps, IReadOnlySet<string> ignored)
+    {
+        foreach (var connection in connections.Where(c => c.ExecutablePath is not null).DistinctBy(c => c.ExecutablePath!, StringComparer.OrdinalIgnoreCase))
+        {
+            var path = connection.ExecutablePath!;
+            if (!GameFolders.TryGetGameRoot(path, out var root, out var name) || ignored.Contains(root))
+            {
+                continue;
+            }
+            var covered = apps.Any(a => AppMatch.Covers(a.Rule.App, path, connection.PackageFamilyName)
+                                        || (a.Rule.App.ExecutablePath is { } rulePath
+                                            && GameFolders.TryGetGameRoot(rulePath, out var ruleRoot, out _)
+                                            && string.Equals(ruleRoot, root, StringComparison.OrdinalIgnoreCase)));
+            if (covered)
+            {
+                continue;
+            }
+            var identity = connection.PackageFamilyName is { } package ? AppIdentity.ForPackage(package, name) : AppIdentity.ForExecutable(path, name);
+            return new NewGamePrompt(name, root, identity with { InstallLocation = root });
+        }
+        return null;
+    }
+}
+
+/// <summary>Small per-user app state: games the user said never to ask about.</summary>
+public sealed class GuiState
+{
+    public List<string> IgnoredGames { get; set; } = [];
+
+    private static string FilePath => System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetRoute", "gui-state.json");
+
+    public static GuiState Load()
+    {
+        try
+        {
+            return System.IO.File.Exists(FilePath)
+                ? JsonSerializer.Deserialize<GuiState>(System.IO.File.ReadAllText(FilePath)) ?? new GuiState()
+                : new GuiState();
+        }
+        catch (Exception)
+        {
+            return new GuiState();
+        }
+    }
+
+    public static void Ignore(string gameRoot)
+    {
+        var state = Load();
+        if (state.IgnoredGames.Contains(gameRoot, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        state.IgnoredGames.Add(gameRoot);
+        try
+        {
+            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(FilePath)!);
+            System.IO.File.WriteAllText(FilePath, JsonSerializer.Serialize(state));
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+    }
+}
