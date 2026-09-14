@@ -43,7 +43,17 @@ public sealed class DefaultRouteManager
         }
         if (state is null)
         {
-            Save(new RouteState(preferred.Luid, other.Luid, [Read(preferred), Read(other)]));
+            // Keep originals still waiting to be restored on adapters that are away right now
+            // (see Restore). Overwriting them would lose those settings for good.
+            var originals = Load()?.Originals.ToList() ?? [];
+            foreach (var adapter in new[] { preferred, other })
+            {
+                if (originals.All(o => o.Luid != adapter.Luid))
+                {
+                    originals.Add(Read(adapter));
+                }
+            }
+            Save(new RouteState(preferred.Luid, other.Luid, originals));
         }
 
         // Effective metric = route metric + interface metric. Leave a clear margin so a small
@@ -73,12 +83,18 @@ public sealed class DefaultRouteManager
 
         var adapters = _adapters.DiscoverAll();
         var failures = new List<string>();
+        var remaining = new List<SavedMetric>();
         foreach (var original in state.Originals)
         {
             var adapter = adapters.FirstOrDefault(a => a.Luid == original.Luid);
             if (adapter is null)
             {
-                continue;   // gone; nothing of ours is left on it
+                // Unplugged, disabled or re-enumerating right now: a USB Wi-Fi adapter can vanish
+                // for a moment. Its metric is still NetRoute's, so keep the original to put back
+                // when it returns. Forgetting it here left a Wi-Fi adapter on NetRoute's metric
+                // for good, tied with Ethernet, so Windows' default connection became a coin toss.
+                remaining.Add(original);
+                continue;
             }
             try
             {
@@ -89,15 +105,24 @@ public sealed class DefaultRouteManager
             catch (Exception ex)
             {
                 failures.Add($"{adapter.Name}: {ex.Message}");
+                remaining.Add(original);
             }
+        }
+
+        // The file is only deleted once every original is back in place.
+        if (remaining.Count == 0)
+        {
+            File.Delete(_statePath);
+        }
+        else
+        {
+            Save(state with { Originals = remaining });
         }
 
         if (failures.Count > 0)
         {
-            // Keep the state file so a later attempt can finish the job.
             throw new InvalidOperationException("Could not restore: " + string.Join("; ", failures));
         }
-        File.Delete(_statePath);
     }
 
     private static SavedMetric Read(NetworkAdapter adapter)

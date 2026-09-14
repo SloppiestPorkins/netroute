@@ -138,15 +138,31 @@ if ($LASTEXITCODE -ne 0) { Fail 'The driver could not be set up (see the message
 # --- 5. Proof ---------------------------------------------------------------
 Step '5. Proof: can NetRoute move an app onto your other connection?'
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Fail 'The .NET SDK is not installed, so the proof cannot be built.' }
+
+# The driver accepts one user at a time. With NetRoute running, it already holds the driver
+# and the proof would fail with a misleading "another program is using the driver".
+$running = Get-Service -Name NetRoute -ErrorAction SilentlyContinue
+if ($running -and $running.Status -eq 'Running') {
+    Write-Host '  NetRoute is running and already using the driver, so the proof is skipped.' -ForegroundColor Green
+    Write-Host '  Open the NetRoute app to see your networks and apps.'
+    Stop-Transcript | Out-Null
+    exit 0
+}
+
 $proofLog = Join-Path $logDir "split-proof-$stamp.txt"
 Push-Location $root
 # Windows PowerShell 5.1 turns any stderr line from a native program into a terminating
 # error under 'Stop', so a harmless build warning would abort the script here.
 $ErrorActionPreference = 'Continue'
+# Take turns with INSTALL-NETROUTE: two builds of the same projects at once can hang or fail.
+$buildLock = New-Object System.Threading.Mutex($false, 'Global\NetRoute.Build')
+[void]$buildLock.WaitOne([TimeSpan]::FromMinutes(10))
 try {
     & dotnet run --project (Join-Path $root 'src\NetRoute.Poc') -- split 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $proofLog
     $proofExit = $LASTEXITCODE
 } finally {
+    $buildLock.ReleaseMutex()
+    $buildLock.Dispose()
     Pop-Location
     $ErrorActionPreference = 'Stop'
 }

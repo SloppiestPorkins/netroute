@@ -306,6 +306,43 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private Task Retry() => RefreshAsync();
 
+    /// <summary>
+    /// Starts the stopped service, via an administrator prompt. A stopped service means
+    /// nothing is protecting the user's apps, so the fix should be one click, not a script.
+    /// </summary>
+    [RelayCommand]
+    private async Task StartService()
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("sc.exe", "start NetRoute")
+            {
+                Verb = "runas",
+                UseShellExecute = true,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden
+            });
+            if (process is not null)
+            {
+                await process.WaitForExitAsync();
+            }
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            ShowToast("Starting NetRoute needs administrator permission.");
+            return;
+        }
+
+        for (var i = 0; i < 10 && Page == "ServiceDown"; i++)
+        {
+            await Task.Delay(1000);
+            await RefreshAsync();
+        }
+        if (Page == "ServiceDown")
+        {
+            ShowToast("The NetRoute service didn't start. Run INSTALL-NETROUTE.cmd again to repair it.");
+        }
+    }
+
     [RelayCommand]
     private async Task AddApp() => await OpenAddAppAsync();
 

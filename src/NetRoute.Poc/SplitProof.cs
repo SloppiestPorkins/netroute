@@ -47,27 +47,46 @@ internal static partial class SplitProof
             return 1;
         }
 
-        // The driver keeps split apps OFF the "tunnel" address and moves them ONTO the
-        // "internet" one. Treating the default-route adapter as the tunnel means a pass can
-        // only come from the driver: without it, these apps would use the default adapter.
-        var stay = usable[0];
-        var move = usable[1];
+        var first = usable[0];
+        var second = usable[1];
+        var firstTcp = await Run(Curl, "--silent", "--max-time", "10", "--interface", first.Ipv4Address!.ToString(), "https://api.ipify.org");
+        var secondTcp = await Run(Curl, "--silent", "--max-time", "10", "--interface", second.Ipv4Address!.ToString(), "https://api.ipify.org");
+        var before = await Run(Curl, "--silent", "--max-time", "10", "https://api.ipify.org");
 
         Console.WriteLine("=== SPLIT-TUNNEL DRIVER PROOF ===\n");
-        Console.WriteLine($"  Windows default : {stay.Name} ({stay.Ipv4Address})");
-        Console.WriteLine($"  Move apps onto  : {move.Name} ({move.Ipv4Address})");
-        Console.WriteLine($"  Apps            : curl.exe (TCP), nslookup.exe (UDP), never bound to an interface\n");
+        Console.WriteLine($"Baseline: {first.Name} egress {Show(firstTcp)}, {second.Name} egress {Show(secondTcp)}, unbound curl {Show(before)}");
 
-        var stayTcp = await Run(Curl, "--silent", "--max-time", "10", "--interface", stay.Ipv4Address!.ToString(), "https://api.ipify.org");
-        var moveTcp = await Run(Curl, "--silent", "--max-time", "10", "--interface", move.Ipv4Address!.ToString(), "https://api.ipify.org");
-        var before = await Run(Curl, "--silent", "--max-time", "10", "https://api.ipify.org");
-        Console.WriteLine($"Baseline: {stay.Name} egress {Show(stayTcp)}, {move.Name} egress {Show(moveTcp)}, unbound curl {Show(before)}");
-
-        if (stayTcp is null || moveTcp is null || stayTcp == moveTcp)
+        if (firstTcp is null || secondTcp is null || firstTcp == secondTcp)
         {
             Console.WriteLine("\nINCONCLUSIVE - the two adapters must both work and reach different public addresses.");
             return 1;
         }
+
+        // The driver keeps split apps OFF the "tunnel" address and moves them ONTO the "internet"
+        // one. Treating the default-route adapter as the tunnel means a pass can only come from
+        // the driver. Which adapter IS the default is taken from where an unbound connection
+        // actually went, not from interface metrics: with equal route costs Windows can use
+        // either, and an earlier version assumed wrong and reported a pass it hadn't earned.
+        NetworkAdapter stay, move;
+        string stayTcp, moveTcp;
+        if (before == firstTcp)
+        {
+            (stay, move, stayTcp, moveTcp) = (first, second, firstTcp, secondTcp);
+        }
+        else if (before == secondTcp)
+        {
+            (stay, move, stayTcp, moveTcp) = (second, first, secondTcp, firstTcp);
+        }
+        else
+        {
+            Console.WriteLine($"\nINCONCLUSIVE - Windows has no clear default connection right now (an unbound connection came out as {Show(before)}).");
+            Console.WriteLine("  This happens when both adapters have the same route cost. Fix the metrics, then run the proof again.");
+            return 1;
+        }
+
+        Console.WriteLine($"  Windows default : {stay.Name} ({stay.Ipv4Address})");
+        Console.WriteLine($"  Move apps onto  : {move.Name} ({move.Ipv4Address})");
+        Console.WriteLine($"  Apps            : curl.exe (TCP), nslookup.exe (UDP), never bound to an interface\n");
 
         SplitTunnelDriver driver;
         try

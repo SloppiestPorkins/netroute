@@ -254,9 +254,16 @@
             </Border>
             <TextBlock Text="NetRoute's background service isn't running" Style="{StaticResource H2}" TextAlignment="Center" Margin="0,20,0,0" />
             <TextBlock Style="{StaticResource Caption}" FontSize="14" TextAlignment="Center" TextWrapping="Wrap" Margin="0,10,0,0" LineHeight="21"
-                       Text="The app needs the NetRoute service to keep your apps on the right network. Install it with INSTALL-NETROUTE.cmd, or start “NetRoute” in Windows Services." />
-            <Button Content="Try again" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Center" Margin="0,22,0,0" MinWidth="120"
-                    Command="{Binding RetryCommand}" />
+                       Text="Until it's running, nothing is keeping your apps on the network you chose. Start it here (Windows will ask for permission), or run INSTALL-NETROUTE.cmd if it isn't installed." />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
+                <Button Style="{StaticResource PrimaryButton}" MinWidth="150" Margin="0,0,8,0" Command="{Binding StartServiceCommand}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE768;" Margin="0,0,8,0" />
+                        <TextBlock Text="Start NetRoute" />
+                    </StackPanel>
+                </Button>
+                <Button Content="Try again" MinWidth="110" Command="{Binding RetryCommand}" />
+            </StackPanel>
         </StackPanel>
 
         <!-- First run -->
