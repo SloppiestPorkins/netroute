@@ -30,7 +30,33 @@ namespace NetRoute.Windows.Split;
 /// </summary>
 public sealed class SplitTunnelDriver : IDisposable
 {
+    /// <summary>The driver's kernel service. Mullvad's name, which NetRoute's installer reuses so there's only ever one.</summary>
+    public const string ServiceName = "mullvad-split-tunnel";
+
     private readonly SafeFileHandle _handle;
+
+    /// <summary>
+    /// Starts the driver if it's installed but not loaded, which is what happens after a restart
+    /// when Mullvad's own service (which normally starts it) is disabled. Starting is always safe;
+    /// only stopping is dangerous (see the class notes). True if it's running afterwards.
+    /// </summary>
+    public static bool TryStartService(TimeSpan wait)
+    {
+        try
+        {
+            using var service = new System.ServiceProcess.ServiceController(ServiceName);
+            if (service.Status == System.ServiceProcess.ServiceControllerStatus.Stopped)
+            {
+                service.Start();
+            }
+            service.WaitForStatus(System.ServiceProcess.ServiceControllerStatus.Running, wait);
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ServiceProcess.TimeoutException or Win32Exception)
+        {
+            return false;
+        }
+    }
 
     private SplitTunnelDriver(SafeFileHandle handle) => _handle = handle;
 

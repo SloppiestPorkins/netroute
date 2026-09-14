@@ -13,6 +13,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- To start the split-tunnel driver after a restart (SplitTunnelDriver.TryStartService). -->
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The interop structs are internal, but their layout is the highest-risk thing
          in the project and must be asserted directly rather than inferred. -->
     <InternalsVisibleTo Include="NetRoute.Tests" />

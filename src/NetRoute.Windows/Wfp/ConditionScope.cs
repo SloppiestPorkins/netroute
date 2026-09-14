@@ -99,6 +99,40 @@ internal sealed class ConditionScope : IDisposable
         };
     }
 
+    /// <summary>Matches a remote address range: an IPv4 address and mask, or an IPv6 prefix.</summary>
+    public FWPM_FILTER_CONDITION0 RemoteRange(System.Net.IPAddress network, int prefixLength)
+    {
+        var bytes = network.GetAddressBytes();
+        IntPtr buffer;
+        FwpDataType type;
+        if (bytes.Length == 4)
+        {
+            // FWP_V4_ADDR_AND_MASK: address, then mask, both host-order UINT32.
+            buffer = Marshal.AllocHGlobal(8);
+            var address = (uint)(bytes[0] << 24 | bytes[1] << 16 | bytes[2] << 8 | bytes[3]);
+            var mask = prefixLength == 0 ? 0u : uint.MaxValue << (32 - prefixLength);
+            Marshal.WriteInt32(buffer, 0, unchecked((int)address));
+            Marshal.WriteInt32(buffer, 4, unchecked((int)mask));
+            type = FwpDataType.V4AddrMask;
+        }
+        else
+        {
+            // FWP_V6_ADDR_AND_MASK: 16 address bytes, then the prefix length.
+            buffer = Marshal.AllocHGlobal(17);
+            Marshal.Copy(bytes, 0, buffer, 16);
+            Marshal.WriteByte(buffer, 16, (byte)prefixLength);
+            type = FwpDataType.V6AddrMask;
+        }
+        _hGlobal.Add(buffer);
+
+        return new FWPM_FILTER_CONDITION0
+        {
+            fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS,
+            matchType = FwpMatchType.Equal,
+            conditionValue = new FWP_VALUE0 { type = type, value = buffer }
+        };
+    }
+
     /// <summary>Matches traffic leaving via a specific interface, identified by LUID.</summary>
     public FWPM_FILTER_CONDITION0 LocalInterface(ulong luid)
     {

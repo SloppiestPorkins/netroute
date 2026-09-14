@@ -34,14 +34,17 @@ public static class TrafficVerdicts
         {
             return true;
         }
-        return SplitImagePaths.GameRoot(app) is { } root
-               && c.ExecutablePath.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase);
+        return SplitImagePaths.GameRoot(app) is { } root && SplitImagePaths.IsOwnFile(root, c.ExecutablePath);
     }
 
     public static AppVerification For(AppEnforcement app, IReadOnlyList<ObservedConnection> connections, DateTimeOffset policyAppliedAt)
     {
         var rule = app.Rule;
-        var mine = connections.Where(c => !c.IsLoopback && Covers(rule.App, c)).ToList();
+        // Local-network destinations (a TV, a NAS) are only reachable through the adapter their
+        // network is on, so they say nothing about the rule. See LocalNetwork.
+        var mine = connections
+            .Where(c => !c.IsLoopback && Covers(rule.App, c) && !(c.Remote is { } remote && LocalNetwork.Contains(remote.Address)))
+            .ToList();
         var attributed = mine.Where(c => c.AdapterLuid is not null).ToList();
         var busiest = attributed.GroupBy(c => c.AdapterName ?? "?").OrderByDescending(g => g.Count()).ToList();
         var observed = busiest.FirstOrDefault()?.Key;

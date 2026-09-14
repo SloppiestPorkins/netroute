@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using NetRoute.Core.Policy;
 
 namespace NetRoute.Windows.Split;
@@ -24,15 +25,16 @@ public sealed class SplitTunnelController : IDisposable
     private bool _initialized;
     private string? _fingerprint;
     private RedirectOutcome _last = new(false, 0, null, "Not applied yet.");
+    private DateTimeOffset _lastDriverStart = DateTimeOffset.MinValue;
 
     public SplitTunnelController(DefaultRouteManager routes)
     {
         _routes = routes;
-        TryOpen();
+        TryOpen(startDriver: true);
     }
 
     /// <summary>True when the driver's device is open and NetRoute can move apps.</summary>
-    public bool Available => TryOpen();
+    public bool Available => TryOpen(startDriver: false);
 
     public string? UnavailableReason { get; private set; }
 
@@ -66,7 +68,7 @@ public sealed class SplitTunnelController : IDisposable
             Disengage();
             outcome = new(false, 0, routeNote, plan.Reason);
         }
-        else if (!TryOpen())
+        else if (!TryOpen(startDriver: true))
         {
             outcome = new(false, 0, routeNote, UnavailableReason);
         }
@@ -159,7 +161,7 @@ public sealed class SplitTunnelController : IDisposable
         }
     }
 
-    private bool TryOpen()
+    private bool TryOpen(bool startDriver)
     {
         if (_driver is not null)
         {
@@ -174,6 +176,29 @@ public sealed class SplitTunnelController : IDisposable
         catch (SplitTunnelException ex)
         {
             UnavailableReason = ex.Message;
+
+            // After a restart nothing may have loaded the driver: Mullvad's own service, which
+            // normally starts it, is disabled so NetRoute can have the driver's only handle.
+            // Starting it is safe, so do it here: at most once a minute, and only on the
+            // reconcile path, never while answering a status request.
+            if (startDriver && ex.InnerException is Win32Exception { NativeErrorCode: 2 }
+                && DateTimeOffset.UtcNow - _lastDriverStart > TimeSpan.FromMinutes(1))
+            {
+                _lastDriverStart = DateTimeOffset.UtcNow;
+                if (SplitTunnelDriver.TryStartService(TimeSpan.FromSeconds(5)))
+                {
+                    try
+                    {
+                        _driver = SplitTunnelDriver.Open();
+                        UnavailableReason = null;
+                        return true;
+                    }
+                    catch (SplitTunnelException retry)
+                    {
+                        UnavailableReason = retry.Message;
+                    }
+                }
+            }
             return false;
         }
     }

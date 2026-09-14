@@ -278,8 +278,9 @@ public static class AppMatch
         {
             return false;
         }
+        // IsOwnFile leaves game libraries out: a game in Steam\steamapps isn't "Steam".
         return string.Equals(rule.ExecutablePath, path, StringComparison.OrdinalIgnoreCase)
-               || (rule.InstallLocation is { Length: > 0 } root && path.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase));
+               || (rule.InstallLocation is { Length: > 0 } root && NetRoute.Windows.Split.SplitImagePaths.IsOwnFile(root, path));
     }
 }
 

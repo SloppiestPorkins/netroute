@@ -31,6 +31,8 @@ internal static class WfpNative
         new("71bc78fa-f17c-4997-a602-6abb261f351c");
     internal static readonly Guid FWPM_CONDITION_IP_LOCAL_INTERFACE =
         new("4cd62a49-59c3-4969-b7f3-bda5d32890a4");
+    internal static readonly Guid FWPM_CONDITION_IP_REMOTE_ADDRESS =
+        new("b235ae9a-1d64-49b8-a44c-5ff3d9095045");
     internal static readonly Guid FWPM_CONDITION_ALE_USER_ID =
         new("af043a0a-b34d-4f86-979c-c90371af6e66");
     internal static readonly Guid FWPM_CONDITION_IP_PROTOCOL =
@@ -47,7 +49,9 @@ internal static class WfpNative
         Uint64 = 4,
         ByteBlob = 12,
         Sid = 13,
-        SecurityDescriptor = 14
+        SecurityDescriptor = 14,
+        V4AddrMask = 0x100,
+        V6AddrMask = 0x101
     }
 
     internal enum FwpMatchType : uint

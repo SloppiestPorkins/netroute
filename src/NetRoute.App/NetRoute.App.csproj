@@ -9,6 +9,7 @@
     <!-- For the tray icon only. -->
     <UseWindowsForms>true</UseWindowsForms>
     <Product>NetRoute</Product>
+    <ApplicationIcon>..\..\assets\netroute.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

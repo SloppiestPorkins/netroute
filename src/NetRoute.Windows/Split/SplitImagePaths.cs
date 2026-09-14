@@ -26,6 +26,28 @@ public static partial class SplitImagePaths
 
     private static readonly string[] StoreMarkers = [@"\steamapps\common\", @"\XboxGames\", @"\Epic Games\"];
 
+    /// <summary>
+    /// Game libraries that can sit directly inside a launcher's own folder: Steam\steamapps,
+    /// Ubisoft Game Launcher\games, GOG Galaxy\Games. A launcher's folder isn't its games.
+    /// Putting Steam on Downloads must never pull every game in its default library with it.
+    /// </summary>
+    private static readonly string[] LibraryFolders = ["steamapps", "games"];
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is one of the app's own program files under
+    /// <paramref name="root"/>, rather than a game in a library folder inside it.
+    /// </summary>
+    public static bool IsOwnFile(string root, string path)
+    {
+        root = root.TrimEnd('\\');
+        if (!path.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        var first = path[(root.Length + 1)..].Split('\\')[0];
+        return path.IndexOf('\\', root.Length + 1) < 0 || !LibraryFolders.Contains(first, StringComparer.OrdinalIgnoreCase);
+    }
+
     public static IReadOnlyList<string> For(AppIdentity app)
     {
         var images = new List<string>();
@@ -127,6 +149,10 @@ public static partial class SplitImagePaths
                 {
                     foreach (var sub in Directory.EnumerateDirectories(dir))
                     {
+                        if (depth == 0 && LibraryFolders.Contains(Path.GetFileName(sub), StringComparer.OrdinalIgnoreCase))
+                        {
+                            continue;   // see LibraryFolders
+                        }
                         pending.Enqueue((sub, depth + 1));
                     }
                 }

@@ -1,6 +1,9 @@
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using NetRoute.Core.Adapters;
 using NetRoute.Core.Policy;
+using NetRoute.Core.Traffic;
+using NetRoute.Windows.Split;
 using static NetRoute.Windows.Wfp.WfpNative;
 
 namespace NetRoute.Windows.Wfp;
@@ -19,6 +22,7 @@ public sealed class WfpEnforcer
     // Relative weights within NetRoute's sublayer. Loopback outranks everything so
     // local IPC survives; the catch-all block sits below the permits by construction.
     private const byte WeightLoopbackPermit = 14;
+    private const byte WeightLocalNetworkPermit = 13;
     private const byte WeightRolePermit = 12;
     private const byte WeightCatchAllBlock = 8;
 
@@ -81,6 +85,18 @@ public sealed class WfpEnforcer
                     systemError = ex;
                 }
             }
+
+            if (_installedFilters.Count > 0)
+            {
+                try
+                {
+                    ApplyLocalNetworkPermits();
+                }
+                catch (WfpException)
+                {
+                    // Local-network traffic then simply follows each app's rule, as it used to.
+                }
+            }
         });
 
         return new EnforcementResult(applied, failed, systemError);
@@ -114,6 +130,27 @@ public sealed class WfpEnforcer
                 {
                     AddServicePinned(scope, layer, identity, plan.Adapter.Luid, label);
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// One set of permits for local-network destinations (see <see cref="LocalNetwork"/>), for
+    /// every app. A TV, a NAS or Steam Remote Play on the Ethernet LAN is reachable only through
+    /// Ethernet and isn't internet traffic, so a Downloads rule mustn't cut it off. They outrank
+    /// NetRoute's own blocks, but live in NetRoute's sublayer, so Windows Firewall still decides
+    /// independently: nothing here allows anything Windows Firewall blocks.
+    /// </summary>
+    private void ApplyLocalNetworkPermits()
+    {
+        using var scope = new ConditionScope();
+        foreach (var layer in V4Layers.Concat(V6Layers))
+        {
+            var v6 = V6Layers.Contains(layer);
+            foreach (var (network, prefix) in LocalNetwork.Ranges.Where(r => (r.Network.AddressFamily == AddressFamily.InterNetworkV6) == v6))
+            {
+                AddFilter(scope, layer, [scope.RemoteRange(network, prefix)], FWP_ACTION_PERMIT, WeightLocalNetworkPermit,
+                    $"Local network {network}/{prefix}");
             }
         }
     }
@@ -158,12 +195,21 @@ public sealed class WfpEnforcer
         }
 
         using var scope = new ConditionScope();
-        var identity = BuildIdentityCondition(scope, app.Rule.App);
+        var installed = 0;
+        foreach (var identity in BuildIdentityConditions(scope, app.Rule.App))
+        {
+            installed += ApplyIdentity(scope, identity, app);
+        }
+        return installed;
+    }
+
+    /// <summary>The permit-and-block shape for one program file (or package) of an app.</summary>
+    private int ApplyIdentity(ConditionScope scope, FWPM_FILTER_CONDITION0 identity, AppEnforcement app)
+    {
         var rule = app.Rule;
         var installed = 0;
-
-        var v4Layers = new[] { FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4 };
-        var v6Layers = new[] { FWPM_LAYER_ALE_AUTH_CONNECT_V6, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6 };
+        var v4Layers = V4Layers;
+        var v6Layers = V6Layers;
 
         if (app.Action == EnforcementAction.BlockAll)
         {
@@ -265,16 +311,39 @@ public sealed class WfpEnforcer
         return [scope.Protocol(rule.EnforceTcp ? IPPROTO_TCP : IPPROTO_UDP)];
     }
 
-    private static FWPM_FILTER_CONDITION0 BuildIdentityCondition(ConditionScope scope, AppIdentity app)
-        => app.Kind switch
+    /// <summary>
+    /// Every program file a rule covers: the package, or the .exe plus the other programs in
+    /// its own folder (see <see cref="SplitImagePaths"/>, which leaves game libraries out). Steam
+    /// downloads through steam.exe but shows its store through steamwebhelper.exe, and a rule for
+    /// "Steam" has to mean both.
+    /// </summary>
+    private static List<FWPM_FILTER_CONDITION0> BuildIdentityConditions(ConditionScope scope, AppIdentity app)
+    {
+        if (app.Kind == AppIdentityKind.Packaged)
         {
-            AppIdentityKind.Packaged when app.PackageFamilyName is { } pfn => scope.PackageId(pfn),
-            AppIdentityKind.Packaged => throw new WfpException(
-                $"Packaged app '{app.DisplayName}' has no package family name", WfpException.FWP_E_INVALID_PARAMETER),
-            _ when app.ExecutablePath is { } path => scope.AppId(path),
-            _ => throw new WfpException(
-                $"App '{app.DisplayName}' has no executable path", WfpException.FWP_E_INVALID_PARAMETER)
-        };
+            return app.PackageFamilyName is { } pfn
+                ? [scope.PackageId(pfn)]
+                : throw new WfpException($"Packaged app '{app.DisplayName}' has no package family name", WfpException.FWP_E_INVALID_PARAMETER);
+        }
+        if (app.ExecutablePath is not { } main)
+        {
+            throw new WfpException($"App '{app.DisplayName}' has no executable path", WfpException.FWP_E_INVALID_PARAMETER);
+        }
+
+        var conditions = new List<FWPM_FILTER_CONDITION0>();
+        foreach (var path in SplitImagePaths.For(app).DefaultIfEmpty(main))
+        {
+            try
+            {
+                conditions.Add(scope.AppId(path));
+            }
+            catch (WfpException) when (!string.Equals(path, main, StringComparison.OrdinalIgnoreCase))
+            {
+                // A helper that disappeared between listing and filtering. The main program still counts.
+            }
+        }
+        return conditions;
+    }
 
     private int AddFilter(
         ConditionScope scope,

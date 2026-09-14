@@ -154,6 +154,10 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
         // Which of the two addresses is ours depends on the event, so ask rather than assume.
         var local = _local;
         IPAddress? mine = local.ContainsKey(a) ? a : local.ContainsKey(b) ? b : null;
+        if (mine is not null && NetRoute.Core.Traffic.LocalNetwork.Contains(ReferenceEquals(mine, a) ? b : a))
+        {
+            return;   // internet traffic only: a copy to the NAS isn't using either connection's ISP
+        }
         var counter = _counters.GetOrAdd((pid, mine), _ => new Counter());
         if (down)
         {
