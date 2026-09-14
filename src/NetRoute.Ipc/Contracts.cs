@@ -162,9 +162,21 @@ public sealed record ServiceStatusDto
     public required IReadOnlyList<AppStatusDto> Apps { get; init; }
     public required IReadOnlyList<LeakObservation> RecentLeaks { get; init; }
     public required IReadOnlyList<ServiceEventDto> RecentEvents { get; init; }
+
+    /// <summary>Set when Windows has no single default connection; null when it does.</summary>
+    public RouteTieDto? RouteTie { get; init; }
+
     public IpcError? LastError { get; init; }
     public required DateTimeOffset GeneratedAt { get; init; }
 }
+
+/// <summary>
+/// Connections Windows ranks exactly equal for internet traffic. With no single default it
+/// spreads new connections across them, so one download can use both networks at once.
+/// </summary>
+public sealed record RouteTieDto(IReadOnlyList<string> AdapterNames, string Message);
+
+public sealed record RouteFixResultDto(bool Fixed, string Message);
 
 /// <summary>Result of changing which adapter a role points at (§38).</summary>
 public sealed record RoleChangeResultDto(RoleId Role, string AdapterName, int AffectedApps, string Message);

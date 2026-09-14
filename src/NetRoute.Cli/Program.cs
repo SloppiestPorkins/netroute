@@ -15,6 +15,7 @@ const string Usage = """
           apps | roles | why <app>       details
           pause | resume                 stop or restart enforcement, keeping your rules
           emergency-disable              remove every NetRoute rule from Windows right now
+          fix-routes                     give Windows one default connection when two are tied
         """;
 
 // Role glyphs and arrows print as '??' under the console's default code page.
@@ -43,11 +44,18 @@ static async Task<int> RunAsync(string[] args)
             case "move" when args.Length >= 3: return await MoveAsync(client, string.Join(' ', args[1..^1]), args[^1]);
             case "remove" when args.Length >= 2: return await RemoveAsync(client, string.Join(' ', args[1..]));
             case "cleanup-driver": return LocalCleanup(removeSublayers: args.Contains("--remove-sublayers"));
+            case "fix-routes":
+            {
+                var result = await client.FixRouteTieAsync();
+                Console.WriteLine(result.Message);
+                return result.Fixed ? 0 : 1;
+            }
             default: Console.Error.WriteLine(Usage); return 1;
         }
         return 0;
     }
     catch (ServiceUnavailableException) when (command == "emergency-disable") { return StopServiceFallback(); }
+    catch (ServiceUnavailableException) when (command == "fix-routes") { return LocalFixRoutes(); }
     catch (ServiceUnavailableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     catch (NetRouteServiceException ex) { Console.Error.WriteLine(ex.Error.FriendlyMessage); return 1; }
     catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
@@ -202,6 +210,7 @@ static void PrintStatus(ServiceStatusDto status)
     Console.WriteLine(status.EnforcementPaused ? "Enforcement: paused" : status.EnforcementActive ? "Enforcement: active" : "Enforcement: unavailable");
     if (status.LastError is { } error) Console.WriteLine($"Problem: {error.FriendlyMessage}");
     if (status.RedirectSummary is { } redirect) Console.WriteLine($"Moving apps: {redirect}");
+    if (status.RouteTie is { } tie) Console.WriteLine($"Problem: {tie.Message} Run 'netroute fix-routes' to fix it.");
     PrintRoles(status.Roles);
     PrintApps(status.Apps);
 }
@@ -255,6 +264,39 @@ static int StopServiceFallback()
         return 1;
     }
     return LocalCleanup(removeSublayers: false);
+}
+
+/// <summary>fix-routes without the service. Changing interface metrics needs an administrator terminal.</summary>
+static int LocalFixRoutes()
+{
+    var adapters = new NetRoute.Core.Adapters.AdapterDiscovery().DiscoverAll();
+    if (NetRoute.Core.Adapters.RouteTies.Find(adapters, new NetRoute.Core.Adapters.DefaultRouteTable().ReadIpv4()) is not { } tie)
+    {
+        Console.WriteLine("Windows already has one default connection. Nothing to fix.");
+        return 0;
+    }
+
+    ulong? downloads = null;
+    try
+    {
+        downloads = new NetRoute.Core.Config.ConfigStore().Load().BindingFor(RoleId.Downloads)?.AdapterLuid;
+    }
+    catch (Exception)
+    {
+        // No readable config: fall back to the fastest tied connection.
+    }
+    var preferred = tie.Adapters.FirstOrDefault(a => a.Luid == downloads) ?? tie.Adapters.OrderByDescending(a => a.LinkSpeedBps).First();
+    try
+    {
+        Console.WriteLine(new NetRoute.Windows.Split.DefaultRouteManager().ResolveTie(tie.Adapters, preferred));
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Couldn't change the connection settings: {ex.Message}");
+        Console.Error.WriteLine("Run this from an administrator terminal:  netroute fix-routes");
+        return 1;
+    }
 }
 
 /// <summary>Resets the split-tunnel driver and restores the default route, without the service.</summary>

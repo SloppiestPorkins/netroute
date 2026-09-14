@@ -9,6 +9,7 @@ if (!console) builder.UseWindowsService(options => options.ServiceName = "NetRou
 builder.ConfigureServices(services =>
 {
     services.AddSingleton<IAdapterSource, AdapterDiscovery>();
+    services.AddSingleton<IDefaultRouteSource, DefaultRouteTable>();
     services.AddSingleton<IEnforcementBackend>(_ =>
     {
         if (!WfpSession.CanOpen(out var reason)) return new NullEnforcementBackend(reason);

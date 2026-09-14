@@ -149,6 +149,51 @@ internal static unsafe class IpHelper
         throw new Win32Exception(ERROR_BUFFER_OVERFLOW);
     }
 
+    [DllImport("iphlpapi.dll", ExactSpelling = true)]
+    private static extern int GetIpForwardTable2(ushort family, byte** table);
+
+    [DllImport("iphlpapi.dll", ExactSpelling = true)]
+    private static extern void FreeMibTable(void* memory);
+
+    // MIB_IPFORWARD_TABLE2 is a ULONG count, then MIB_IPFORWARD_ROW2 rows aligned to 8 bytes.
+    // Offsets within a 104-byte row: InterfaceLuid 0, InterfaceIndex 8, DestinationPrefix 12
+    // (a 28-byte SOCKADDR_INET, then PrefixLength at 40), Metric 84.
+    private const int ForwardRowSize = 104;
+    private const int ForwardTableHeader = 8;
+
+    internal readonly record struct RawRoute(ulong Luid, uint InterfaceIndex, uint Metric);
+
+    /// <summary>IPv4 default routes (0.0.0.0/0) with their route metric, one per route.</summary>
+    internal static List<RawRoute> ReadIpv4DefaultRoutes()
+    {
+        byte* table = null;
+        var result = GetIpForwardTable2(AF_INET, &table);
+        if (result != ERROR_SUCCESS)
+        {
+            throw new Win32Exception(result);
+        }
+        try
+        {
+            var count = *(uint*)table;
+            var routes = new List<RawRoute>();
+            for (var i = 0; i < count; i++)
+            {
+                var row = table + ForwardTableHeader + i * ForwardRowSize;
+                var family = *(ushort*)(row + 12);
+                var prefixLength = row[40];
+                if (family == AF_INET && prefixLength == 0)
+                {
+                    routes.Add(new RawRoute(*(ulong*)row, *(uint*)(row + 8), *(uint*)(row + 84)));
+                }
+            }
+            return routes;
+        }
+        finally
+        {
+            FreeMibTable(table);
+        }
+    }
+
     private static List<RawAdapter> Parse(IntPtr head)
     {
         var adapters = new List<RawAdapter>();

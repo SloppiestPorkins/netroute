@@ -104,6 +104,7 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
                 IpcCommands.SetRulePaused => await SetRulePaused(request, ct),
                 IpcCommands.SetEnforcementPaused => await SetPaused(request, ct),
                 IpcCommands.EmergencyDisable => await EmergencyDisable(ct),
+                IpcCommands.FixRouteTie => await engine.FixRouteTieAsync(ct),
                 _ => throw new NetRouteServiceException(new IpcError { FriendlyMessage = "NetRoute does not recognize that command.", TechnicalDetail = $"Unknown command: {request.Command}" })
             };
             return new IpcResponse { Ok = true, Payload = value is null ? null : JsonSerializer.SerializeToElement(value, IpcProtocol.JsonOptions) };

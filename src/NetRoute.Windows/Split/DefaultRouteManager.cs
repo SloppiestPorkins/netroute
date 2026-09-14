@@ -125,6 +125,55 @@ public sealed class DefaultRouteManager
         }
     }
 
+    /// <summary>
+    /// Breaks a tie for Windows' default route (see <see cref="RouteTies"/>). Every tied
+    /// connection goes back to Windows' automatic metric; if they still tie after that, the
+    /// others are ranked just below <paramref name="preferred"/>. Returns a sentence for the user.
+    /// </summary>
+    public string ResolveTie(IReadOnlyList<NetworkAdapter> tied, NetworkAdapter preferred)
+    {
+        foreach (var adapter in tied)
+        {
+            Run($"Set-NetIPInterface -InterfaceIndex {adapter.InterfaceIndex} -AddressFamily IPv4 -AutomaticMetric Enabled");
+        }
+
+        var preferredCost = Cost(preferred);
+        var replaced = tied.ToDictionary(a => a.Luid, a => new SavedMetric(a.Luid, true, 0));
+        var ranked = new List<string>();
+        foreach (var other in tied.Where(a => a.Luid != preferred.Luid))
+        {
+            var otherCost = Cost(other);
+            if (otherCost <= preferredCost)
+            {
+                var metric = Math.Clamp(InterfaceMetric(other) + preferredCost - otherCost + 10, 1, 9999);
+                SetMetric(other.InterfaceIndex, metric);
+                replaced[other.Luid] = new SavedMetric(other.Luid, false, (int)metric);
+                ranked.Add(other.Name);
+            }
+        }
+
+        // Saved originals for these connections are the settings that tied. Restoring them
+        // later would bring the tie straight back, so restore the fixed settings instead.
+        if (Load() is { } state)
+        {
+            Save(state with { Originals = state.Originals.Select(o => replaced.GetValueOrDefault(o.Luid, o)).ToList() });
+        }
+
+        var winner = DefaultRouteWinner();
+        var winnerName = tied.FirstOrDefault(a => a.InterfaceIndex == winner)?.Name;
+        var how = ranked.Count == 0
+            ? "Windows' automatic settings are back on"
+            : $"Windows' automatic settings are back on and {string.Join(", ", ranked)} now ranks below {preferred.Name}";
+        return winnerName is null
+            ? $"{how}, but Windows is routing through interface {winner}."
+            : $"Fixed. {how}, so {winnerName} is Windows' one default connection.";
+    }
+
+    private static long Cost(NetworkAdapter adapter) => DefaultRouteMetric(adapter.InterfaceIndex) + InterfaceMetric(adapter);
+
+    private static long InterfaceMetric(NetworkAdapter adapter)
+        => long.Parse(Run($"[int](Get-NetIPInterface -InterfaceIndex {adapter.InterfaceIndex} -AddressFamily IPv4).InterfaceMetric"));
+
     private static SavedMetric Read(NetworkAdapter adapter)
     {
         var json = Run($"$i = Get-NetIPInterface -InterfaceIndex {adapter.InterfaceIndex} -AddressFamily IPv4; " +

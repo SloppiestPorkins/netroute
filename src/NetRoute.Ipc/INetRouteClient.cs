@@ -41,4 +41,7 @@ public interface INetRouteClient
 
     /// <summary>Remove every NetRoute filter and keep enforcement off until resumed (§43).</summary>
     Task EmergencyDisableAsync(CancellationToken ct = default);
+
+    /// <summary>Give Windows one default connection when two are tied (see <see cref="RouteTieDto"/>).</summary>
+    Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default);
 }

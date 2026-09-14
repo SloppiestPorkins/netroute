@@ -19,6 +19,11 @@ public sealed class EmptyConnectionSource : IConnectionSource
     public IReadOnlyList<ConnectionDto> GetConnections() => [];
 }
 
+public sealed class NoDefaultRoutes : IDefaultRouteSource
+{
+    public IReadOnlyList<DefaultRoute> ReadIpv4() => [];
+}
+
 public interface IPolicyPlanResolver
 {
     EnforcementPlan Resolve(NetRouteConfig config);
@@ -39,6 +44,7 @@ public sealed class NetRouteEngine : IDisposable
     private readonly IEnforcementBackend _backend;
     private readonly IAppVerifier _verifier;
     private readonly IConnectionSource _connections;
+    private readonly IDefaultRouteSource _routes;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly List<ServiceEventDto> _events = [];
     private Dictionary<RoleId, RoleHealth> _roleHealth = [];
@@ -56,7 +62,8 @@ public sealed class NetRouteEngine : IDisposable
         string? configPath = null,
         IAppVerifier? verifier = null,
         IConnectionSource? connections = null,
-        IPolicyPlanResolver? resolver = null)
+        IPolicyPlanResolver? resolver = null,
+        IDefaultRouteSource? routes = null)
     {
         _store = new ConfigStore(configPath);
         _adapters = adapters;
@@ -64,6 +71,7 @@ public sealed class NetRouteEngine : IDisposable
         _verifier = verifier ?? new PlanOnlyVerifier();
         _connections = connections ?? new EmptyConnectionSource();
         _resolver = resolver ?? new PolicyPlanResolver(adapters);
+        _routes = routes ?? new NoDefaultRoutes();
     }
 
     public async Task ReconcileAsync(CancellationToken ct = default)
@@ -82,6 +90,7 @@ public sealed class NetRouteEngine : IDisposable
             _plan ??= _resolver.Resolve(config);
             var adapters = _adapters.DiscoverAll();
             var verifications = _verifier.Verify(_plan, _policyAppliedAt).ToDictionary(v => v.RuleId);
+            var tie = FindTie(adapters);
             return new ServiceStatusDto
             {
                 ProtocolVersion = IpcProtocol.Version,
@@ -94,6 +103,9 @@ public sealed class NetRouteEngine : IDisposable
                 Apps = _plan.Applications.Select(a => BuildApp(a, verifications.GetValueOrDefault(a.Rule.Id))).ToList(),
                 RecentLeaks = verifications.Values.SelectMany(v => v.Leaks).OrderByDescending(l => l.At).ToList(),
                 RecentEvents = _events.ToList(),
+                RouteTie = tie is null ? null : new RouteTieDto(tie.Adapters.Select(a => a.Name).ToList(),
+                    $"{tie.Names} are tied as Windows' default connection, so Windows splits traffic between them " +
+                    "and a download can use both at once."),
                 LastError = _lastError,
                 GeneratedAt = DateTimeOffset.UtcNow
             };
@@ -179,6 +191,57 @@ public sealed class NetRouteEngine : IDisposable
             AddEvent(ServiceEventKind.EmergencyDisabled, "Emergency disable", "All NetRoute enforcement was disabled.");
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            if (FindTie(_adapters.DiscoverAll()) is not { } tie)
+            {
+                return new(true, "Windows already has one default connection. Nothing to fix.");
+            }
+
+            // Downloads is the connection NetRoute makes the default, so it wins the tie-break.
+            var config = _store.Load();
+            var downloads = config.BindingFor(RoleId.Downloads)?.AdapterLuid;
+            var preferred = tie.Adapters.FirstOrDefault(a => a.Luid == downloads)
+                            ?? tie.Adapters.OrderByDescending(a => a.LinkSpeedBps).First();
+            string message;
+            try
+            {
+                message = _backend.FixRouteTie(tie, preferred);
+            }
+            catch (NotSupportedException ex)
+            {
+                throw Friendly(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                throw new NetRouteServiceException(new IpcError { FriendlyMessage = "NetRoute couldn't change the connection settings.", TechnicalDetail = ex.Message });
+            }
+
+            AddEvent(ServiceEventKind.Info, "Default connection fixed", message);
+            ReconcileLocked(config);
+            return FindTie(_adapters.DiscoverAll()) is { } still
+                ? new(false, $"{message} Windows still ranks {still.Names} equally.")
+                : new(true, message);
+        }
+        finally { _gate.Release(); }
+    }
+
+    private RouteTie? FindTie(IReadOnlyList<NetworkAdapter> adapters)
+    {
+        try
+        {
+            return RouteTies.Find(adapters, _routes.ReadIpv4());
+        }
+        catch (Exception)
+        {
+            // A failed routing-table read must not take status down with it.
+            return null;
+        }
     }
 
     private async Task MutateAsync(Func<NetRouteConfig, NetRouteConfig> mutation, CancellationToken ct)

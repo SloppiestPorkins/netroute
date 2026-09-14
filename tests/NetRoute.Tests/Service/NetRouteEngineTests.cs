@@ -85,6 +85,26 @@ public sealed class NetRouteEngineTests : IDisposable
         await Assert.ThrowsAsync<NetRouteServiceException>(() => engine.CompleteSetupAsync(EthernetLuid, 999));
     }
 
+    [Fact]
+    public async Task TiedDefaultRoutesAreReportedAndFixedTowardDownloads()
+    {
+        var routes = new FakeRoutes(new DefaultRoute(EthernetLuid, 11, 0), new DefaultRoute(WifiLuid, 22, 0));
+        var backend = new CountingBackend { OnFix = () => routes.Routes = [new DefaultRoute(EthernetLuid, 11, 20), new DefaultRoute(WifiLuid, 22, 0)] };
+        using var engine = new NetRouteEngine(new MutableAdapterSource(Ethernet(), Wifi()), backend, ConfigPath, routes: routes);
+        await engine.CompleteSetupAsync(EthernetLuid, WifiLuid);
+
+        var tie = (await engine.GetStatusAsync()).RouteTie;
+        Assert.NotNull(tie);
+        Assert.Equal(new[] { "Ethernet", "Wi-Fi" }, tie!.AdapterNames);
+
+        var result = await engine.FixRouteTieAsync();
+        Assert.True(result.Fixed);
+        Assert.Equal(WifiLuid, backend.FixedPreferred);
+        Assert.Null((await engine.GetStatusAsync()).RouteTie);
+        Assert.True((await engine.FixRouteTieAsync()).Fixed);
+        Assert.Equal(1, backend.FixCount);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory)) Directory.Delete(_directory, true);
@@ -116,7 +136,17 @@ public sealed class NetRouteEngineTests : IDisposable
         public bool RedirectionAvailable => false;
         public BackendApplyResult Apply(EnforcementPlan plan) { ApplyCount++; return BackendApplyResult.Success; }
         public void EmergencyDisable() => DisableCount++;
+        public Action? OnFix { get; init; }
+        public ulong? FixedPreferred { get; private set; }
+        public int FixCount { get; private set; }
+        public string FixRouteTie(RouteTie tie, NetworkAdapter preferred) { FixCount++; FixedPreferred = preferred.Luid; OnFix?.Invoke(); return "fixed"; }
         public void Dispose() { }
+    }
+
+    internal sealed class FakeRoutes(params DefaultRoute[] routes) : IDefaultRouteSource
+    {
+        public IReadOnlyList<DefaultRoute> Routes { get; set; } = routes;
+        public IReadOnlyList<DefaultRoute> ReadIpv4() => Routes;
     }
 
     private sealed class ThrowingResolver : IPolicyPlanResolver

@@ -26,6 +26,8 @@ internal static class Program
                 return await AppDiscoveryProof.RunAsync();
             case "split":
                 return await SplitProof.RunAsync();
+            case "routes":
+                return RouteTableProof.Run();
         }
 
         var discovery = new AdapterDiscovery();

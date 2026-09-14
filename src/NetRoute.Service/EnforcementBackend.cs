@@ -27,6 +27,13 @@ public interface IEnforcementBackend : IDisposable
     /// backend can't move apps.
     /// </summary>
     string? ApplyRedirect(RedirectPlan plan) => null;
+
+    /// <summary>
+    /// Gives Windows one default connection when several tie (see <see cref="RouteTies"/>),
+    /// favouring <paramref name="preferred"/>. Returns a sentence for the user.
+    /// </summary>
+    string FixRouteTie(RouteTie tie, NetworkAdapter preferred)
+        => throw new NotSupportedException("NetRoute needs administrator rights to change connection settings.");
 }
 
 /// <summary>
@@ -38,13 +45,23 @@ public sealed class WfpEnforcementBackend : IEnforcementBackend
     private readonly WfpSession _session;
     private readonly WfpEnforcer _enforcer;
     private readonly SplitTunnelController _split;
+    private readonly DefaultRouteManager _routes;
 
     public WfpEnforcementBackend()
     {
         var adapters = new AdapterDiscovery();
         _session = WfpSession.Open();
         _enforcer = new WfpEnforcer(_session, adapters);
-        _split = new SplitTunnelController(new DefaultRouteManager(adapters));
+        _routes = new DefaultRouteManager(adapters);
+        _split = new SplitTunnelController(_routes);
+    }
+
+    public string FixRouteTie(RouteTie tie, NetworkAdapter preferred)
+    {
+        var message = _routes.ResolveTie(tie.Adapters, preferred);
+        // While NetRoute manages the default route, put its own settings back on top.
+        _split.Invalidate();
+        return message;
     }
 
     public bool IsAvailable => true;

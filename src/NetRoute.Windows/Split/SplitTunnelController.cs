@@ -118,6 +118,9 @@ public sealed class SplitTunnelController : IDisposable
         return outcome;
     }
 
+    /// <summary>Forget the last applied plan, so the next reconcile applies it again.</summary>
+    public void Invalidate() => _fingerprint = null;
+
     /// <summary>Stop moving apps. Resets the driver (never unloads it).</summary>
     public void Disengage()
     {

@@ -23,6 +23,7 @@ public sealed class DemoNetRouteClient : INetRouteClient
     private readonly List<ServiceEventDto> _events = [];
     private bool _setup;
     private bool _paused;
+    private bool _tied = true;
 
     public DemoNetRouteClient(bool firstRun)
     {
@@ -112,6 +113,9 @@ public sealed class DemoNetRouteClient : INetRouteClient
             Apps = apps,
             RecentLeaks = [],
             RecentEvents = _events,
+            RouteTie = _tied
+                ? new RouteTieDto(["Ethernet", "Wi-Fi 2"], "Ethernet and Wi-Fi 2 are tied as Windows' default connection, so Windows splits traffic between them and a download can use both at once.")
+                : null,
             GeneratedAt = DateTimeOffset.Now
         });
     }
@@ -171,6 +175,12 @@ public sealed class DemoNetRouteClient : INetRouteClient
     {
         _paused = true;
         return Task.CompletedTask;
+    }
+
+    public Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default)
+    {
+        _tied = false;
+        return Task.FromResult(new RouteFixResultDto(true, "Fixed. Windows' automatic settings are back on, so Wi-Fi 2 is Windows' one default connection."));
     }
 
     private static AdapterDto Adapter(ulong luid, string name, string description, AdapterKind kind, string speed, string ip, bool v6, bool selectable) => new()

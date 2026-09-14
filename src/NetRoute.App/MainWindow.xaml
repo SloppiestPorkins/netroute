@@ -344,15 +344,30 @@
                 </StackPanel>
             </DockPanel>
 
-            <!-- Banner -->
-            <Border Grid.Row="1" Background="{StaticResource WarnTintBrush}" BorderBrush="#55F5A524" BorderThickness="1"
-                    CornerRadius="10" Padding="14,10" Margin="0,16,0,0"
-                    Visibility="{Binding Banner, Converter={StaticResource NullVisibility}}">
-                <DockPanel>
-                    <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource WarnBrush}" VerticalAlignment="Top" Margin="0,2,10,0" />
-                    <TextBlock Text="{Binding Banner}" TextWrapping="Wrap" LineHeight="20" />
-                </DockPanel>
-            </Border>
+            <!-- Banners -->
+            <StackPanel Grid.Row="1">
+                <Border Background="{StaticResource WarnTintBrush}" BorderBrush="#55F5A524" BorderThickness="1"
+                        CornerRadius="10" Padding="14,10" Margin="0,16,0,0"
+                        Visibility="{Binding Banner, Converter={StaticResource NullVisibility}}">
+                    <DockPanel>
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource WarnBrush}" VerticalAlignment="Top" Margin="0,2,10,0" />
+                        <TextBlock Text="{Binding Banner}" TextWrapping="Wrap" LineHeight="20" />
+                    </DockPanel>
+                </Border>
+
+                <!-- Two connections tied for Windows' default route: one-click fix -->
+                <Border Background="{StaticResource WarnTintBrush}" BorderBrush="#55F5A524" BorderThickness="1"
+                        CornerRadius="10" Padding="14,10" Margin="0,16,0,0"
+                        Visibility="{Binding RouteTieText, Converter={StaticResource NullVisibility}}">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Fix it" VerticalAlignment="Center"
+                                Margin="14,0,0,0" Command="{Binding FixRouteTieCommand}"
+                                ToolTip="Give Windows one default connection. Needs no restart." />
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE7BA;" Foreground="{StaticResource WarnBrush}" VerticalAlignment="Top" Margin="0,2,10,0" />
+                        <TextBlock Text="{Binding RouteTieText}" TextWrapping="Wrap" LineHeight="20" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
+            </StackPanel>
 
             <!-- Networks -->
             <TextBlock Grid.Row="2" Text="YOUR NETWORKS" Style="{StaticResource Section}" Margin="0,24,0,10" />

@@ -23,6 +23,7 @@ public sealed class NamedPipeNetRouteClient(string? pipeName = null) : INetRoute
     public Task SetRulePausedAsync(Guid ruleId, bool paused, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetRulePaused, new SetRulePausedRequest(ruleId, paused), ct);
     public Task SetEnforcementPausedAsync(bool paused, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetEnforcementPaused, new SetPausedRequest(paused), ct);
     public Task EmergencyDisableAsync(CancellationToken ct = default) => CallAsync<object?>(IpcCommands.EmergencyDisable, null, ct);
+    public Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default) => CallAsync<RouteFixResultDto>(IpcCommands.FixRouteTie, null, ct);
 
     private async Task<T> CallAsync<T>(string command, object? payload, CancellationToken ct)
     {

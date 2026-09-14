@@ -60,6 +60,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private Brush _overallBrush = Ui.Res("MutedBrush");
     [ObservableProperty] private Brush _overallTint = Ui.Res("NeutralTintBrush");
     [ObservableProperty] private string? _banner;
+    [ObservableProperty] private string? _routeTieText;
     [ObservableProperty] private string? _redirectText;
     [ObservableProperty] private string? _serviceProblem;
     [ObservableProperty] private object? _overlay;
@@ -162,6 +163,7 @@ public partial class MainViewModel : ObservableObject
                         "the split-tunnel driver isn't running. Run RUN-NETROUTE-SETUP.cmd to fix this.");
         }
         Banner = banners.Count == 0 ? null : string.Join("\n", banners);
+        RouteTieText = status.RouteTie?.Message;
         RedirectText = status.RedirectSummary;
 
         SyncRoles(status.Roles);
@@ -384,6 +386,18 @@ public partial class MainViewModel : ObservableObject
         "This removes all NetRoute rules from Windows immediately and returns your network to normal. " +
         "Your app list is kept, and you can turn protection back on at any time.",
         "Disable everything", () => Run(() => _client.EmergencyDisableAsync(), "NetRoute is off. Normal Windows networking is restored."));
+
+    /// <summary>One click for the tie in <see cref="RouteTieText"/>. The service makes the change; it has the rights to.</summary>
+    [RelayCommand]
+    private async Task FixRouteTie()
+    {
+        RouteFixResultDto? result = null;
+        await Run(async () => result = await _client.FixRouteTieAsync());
+        if (result is not null)
+        {
+            ShowToast(result.Message);
+        }
+    }
 
     [RelayCommand]
     private void CloseOverlay() => Overlay = null;
