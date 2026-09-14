@@ -15,6 +15,11 @@ builder.ConfigureServices(services =>
         try { return new WfpEnforcementBackend(); }
         catch (Exception ex) { return new NullEnforcementBackend(ex.Message); }
     });
+    // Observed traffic: what makes "Verified" mean something, and feeds the live view.
+    services.AddSingleton(sp => new NetRoute.Windows.Traffic.TrafficObserver(sp.GetRequiredService<IAdapterSource>()));
+    services.AddSingleton<ConnectionVerifier>();
+    services.AddSingleton<NetRoute.Core.Traffic.IAppVerifier>(sp => sp.GetRequiredService<ConnectionVerifier>());
+    services.AddSingleton<IConnectionSource>(sp => sp.GetRequiredService<ConnectionVerifier>());
     services.AddSingleton<NetRouteEngine>();
     services.AddSingleton<NamedPipeServer>();
     services.AddHostedService<ServiceWorker>();

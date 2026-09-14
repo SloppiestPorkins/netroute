@@ -62,6 +62,13 @@ public sealed record NetworkAdapter
     public required IPAddress? Ipv4Address { get; init; }
     public required IPAddress? Ipv6Address { get; init; }
     public required IReadOnlyList<IPAddress> Gateways { get; init; }
+
+    /// <summary>
+    /// Every unicast address on the adapter, not just the first of each family. Connections are
+    /// attributed to an adapter by their local address, and an adapter can carry several
+    /// (temporary IPv6 addresses especially), so matching only the first would miss traffic.
+    /// </summary>
+    public IReadOnlyList<IPAddress> UnicastAddresses { get; init; } = [];
     public required IReadOnlyList<IPAddress> DnsServers { get; init; }
 
     /// <summary>Negotiated downlink speed in bits per second.</summary>

@@ -66,6 +66,7 @@ public sealed class AdapterDiscovery : IAdapterSource
             Ipv4Address = ipv4,
             Ipv6Address = ipv6,
             Gateways = raw.Gateways,
+            UnicastAddresses = raw.UnicastAddresses,
             DnsServers = raw.DnsServers,
             LinkSpeedBps = raw.ReceiveLinkSpeed,
             Ipv4Metric = raw.Ipv4Metric,

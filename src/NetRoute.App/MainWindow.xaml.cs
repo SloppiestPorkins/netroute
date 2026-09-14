@@ -76,6 +76,9 @@ public partial class MainWindow : Window
             case "change" when _vm.Apps.Count > 0:
                 _vm.ChangeNetworkCommand.Execute(_vm.Apps[0]);
                 break;
+            case "live":
+                await _vm.OpenLiveAsync();
+                break;
             case "emergency":
                 _vm.EmergencyDisableCommand.Execute(null);
                 break;

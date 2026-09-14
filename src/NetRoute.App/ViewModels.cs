@@ -93,6 +93,11 @@ public partial class MainViewModel : ObservableObject
             Status = status;
             ServiceProblem = null;
             Apply(status);
+            UpdateRates();
+            if (Overlay is LiveViewModel live)
+            {
+                await live.RefreshAsync();
+            }
         }
         catch (ServiceUnavailableException ex)
         {
@@ -162,6 +167,79 @@ public partial class MainViewModel : ObservableObject
         SyncRoles(status.Roles);
         SyncApps(apps);
         RaiseNotifications(status.RecentEvents);
+    }
+
+    private readonly Dictionary<string, Counter> _counters = new(StringComparer.OrdinalIgnoreCase);
+
+    private sealed record Counter(long Received, long Sent, DateTime At, long StartReceived, long StartSent);
+
+    /// <summary>
+    /// Live speed per network, from Windows' own per-adapter byte counters. Read here in the
+    /// app because they need no privileges and change every second.
+    /// </summary>
+    private void UpdateRates()
+    {
+        Dictionary<string, System.Net.NetworkInformation.NetworkInterface> nics;
+        try
+        {
+            nics = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                .GroupBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var card in Roles)
+        {
+            if (card.AdapterGuid is not { } id || !nics.TryGetValue(id, out var nic))
+            {
+                card.SetRates(null, null, null, null);
+                continue;
+            }
+
+            long received, sent;
+            try
+            {
+                var stats = nic.GetIPStatistics();
+                received = stats.BytesReceived;
+                sent = stats.BytesSent;
+            }
+            catch (Exception)
+            {
+                card.SetRates(null, null, null, null);
+                continue;
+            }
+
+            if (!_counters.TryGetValue(id, out var previous) || received < previous.Received || sent < previous.Sent)
+            {
+                // First reading, or the counters reset because the adapter reconnected.
+                _counters[id] = new Counter(received, sent, now, received, sent);
+                card.SetRates(0, 0, 0, 0);
+                continue;
+            }
+
+            var seconds = (now - previous.At).TotalSeconds;
+            if (seconds < 0.2)
+            {
+                continue;
+            }
+            card.SetRates((received - previous.Received) / seconds, (sent - previous.Sent) / seconds,
+                received - previous.StartReceived, sent - previous.StartSent);
+            _counters[id] = previous with { Received = received, Sent = sent, At = now };
+        }
+    }
+
+    [RelayCommand]
+    private Task OpenLive() => OpenLiveAsync();
+
+    public async Task OpenLiveAsync()
+    {
+        var vm = new LiveViewModel(this);
+        Overlay = vm;
+        await vm.RefreshAsync();
     }
 
     private void SetOverall(string text, string brush, string tint)
@@ -320,6 +398,22 @@ public partial class RoleCardViewModel(RoleId role) : ObservableObject
     public Brush RoleTint { get; } = Ui.RoleTint(role);
     public string Title { get; } = role.DisplayName().ToUpperInvariant();
 
+    [ObservableProperty] private string _downRate = "—";
+    [ObservableProperty] private string _upRate = "—";
+    [ObservableProperty] private string? _sessionText;
+
+    /// <summary>The adapter's GUID, used to read its byte counters for the live speed.</summary>
+    public string? AdapterGuid { get; private set; }
+
+    public void SetRates(double? down, double? up, long? received, long? sent)
+    {
+        DownRate = down is { } d ? Format.Rate(d) : "—";
+        UpRate = up is { } u ? Format.Rate(u) : "—";
+        SessionText = received is { } rx && sent is { } tx
+            ? $"Since NetRoute opened: {Format.Bytes(rx)} down  ·  {Format.Bytes(tx)} up"
+            : null;
+    }
+
     [ObservableProperty] private string _adapterName = "Not chosen";
     [ObservableProperty] private string _details = "";
     [ObservableProperty] private string _healthText = "";
@@ -329,6 +423,7 @@ public partial class RoleCardViewModel(RoleId role) : ObservableObject
     public void Update(RoleStatusDto r)
     {
         AdapterName = r.Adapter?.Name ?? r.LastKnownName ?? "Not chosen";
+        AdapterGuid = r.Adapter?.Guid;
 
         var parts = new List<string>();
         if (r.Adapter is { } a)
@@ -706,6 +801,92 @@ public sealed record ReasonLine(bool Good, string Text)
     public string Glyph => Good ? "" : "";
     public Brush Brush => Ui.Res(Good ? "GoodBrush" : "BadBrush");
 }
+
+/// <summary>Byte and speed formatting for people.</summary>
+public static class Format
+{
+    public static string Rate(double bytesPerSecond) => Bytes(bytesPerSecond) + "/s";
+
+    public static string Bytes(double bytes) => bytes switch
+    {
+        < 1024 => $"{bytes:0} B",
+        < 1024 * 1024 => $"{bytes / 1024:0.0} KB",
+        < 1024d * 1024 * 1024 => $"{bytes / 1024 / 1024:0.0} MB",
+        _ => $"{bytes / 1024 / 1024 / 1024:0.00} GB"
+    };
+}
+
+/// <summary>
+/// "What's using each network": every app with live connections, grouped by the adapter
+/// the connections actually use. Not limited to apps with rules.
+/// </summary>
+public partial class LiveViewModel(MainViewModel main) : ObservableObject
+{
+    public ObservableCollection<LiveGroup> Groups { get; } = [];
+
+    [ObservableProperty] private string? _empty = "Reading live connections…";
+    [ObservableProperty] private string? _footnote;
+
+    public async Task RefreshAsync()
+    {
+        IReadOnlyList<ConnectionDto> connections;
+        try
+        {
+            connections = await main.Client.GetConnectionsAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            Empty = "Couldn't read live connections from the NetRoute service.";
+            return;
+        }
+
+        var groups = connections
+            .Where(c => c.InterfaceName is not null)
+            .GroupBy(c => c.InterfaceName!)
+            .Select(g =>
+            {
+                var card = main.Roles.FirstOrDefault(r => string.Equals(r.AdapterName, g.Key, StringComparison.OrdinalIgnoreCase));
+                var items = g.GroupBy(c => c.ProcessName, StringComparer.OrdinalIgnoreCase)
+                    .Select(p => new LiveItem(p.Key, Detail(p.ToList()), p.Count()))
+                    .OrderByDescending(i => i.Count)
+                    .ToList();
+                var subtitle = card is null
+                    ? $"{items.Count} app{(items.Count == 1 ? "" : "s")}"
+                    : $"{card.Role.DisplayName()} network  ·  ↓ {card.DownRate}  ↑ {card.UpRate}";
+                return new LiveGroup(g.Key, subtitle, card?.RoleBrush ?? Ui.Res("DefaultBrush"), card?.Glyph ?? Ui.Glyph(RoleId.Default),
+                    items.Take(12).ToList(), items.Count > 12 ? $"+ {items.Count - 12} more" : null, g.Count());
+            })
+            .OrderByDescending(g => g.Total)
+            .ToList();
+
+        Groups.Clear();
+        foreach (var group in groups)
+        {
+            Groups.Add(group);
+        }
+
+        var loose = connections.Count(c => c.InterfaceName is null);
+        Empty = groups.Count == 0 ? "No app has network connections right now." : null;
+        Footnote = loose > 0
+            ? $"{loose} more socket{(loose == 1 ? " isn't" : "s aren't")} tied to one network yet (for example UDP that hasn't sent anything), so {(loose == 1 ? "it isn't" : "they aren't")} shown."
+            : null;
+    }
+
+    private static string Detail(List<ConnectionDto> connections)
+    {
+        var tcp = connections.Count(c => c.Protocol == TransportProtocol.Tcp);
+        var udp = connections.Count(c => c.Protocol == TransportProtocol.Udp);
+        var parts = new List<string>();
+        if (tcp > 0) parts.Add($"{tcp} TCP");
+        if (udp > 0) parts.Add($"{udp} UDP");
+        return string.Join("  ·  ", parts);
+    }
+}
+
+public sealed record LiveGroup(string Title, string Subtitle, Brush Accent, string Glyph, IReadOnlyList<LiveItem> Items, string? More, int Total);
+
+public sealed record LiveItem(string Name, string Detail, int Count);
 
 /// <summary>A yes/no question with a destructive action.</summary>
 public partial class ConfirmViewModel(string title, string message, string confirmText, Func<Task> action) : ObservableObject

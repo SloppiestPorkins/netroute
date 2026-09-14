@@ -42,7 +42,30 @@ public sealed class DemoNetRouteClient : INetRouteClient
         => Task.FromResult<IReadOnlyList<AdapterDto>>(_adapters);
 
     public Task<IReadOnlyList<ConnectionDto>> GetConnectionsAsync(CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<ConnectionDto>>([]);
+    {
+        var list = new List<ConnectionDto>();
+        void Add(string name, int pid, string? adapter, string ip, int tcp, int udp)
+        {
+            for (var i = 0; i < tcp; i++)
+            {
+                list.Add(new ConnectionDto { ProcessId = pid, ProcessName = name, Protocol = TransportProtocol.Tcp,
+                    LocalEndpoint = $"{ip}:{50000 + i}", RemoteEndpoint = $"203.0.113.{i + 1}:443", InterfaceName = adapter, State = "Established" });
+            }
+            for (var i = 0; i < udp; i++)
+            {
+                list.Add(new ConnectionDto { ProcessId = pid, ProcessName = name, Protocol = TransportProtocol.Udp,
+                    LocalEndpoint = $"{ip}:{60000 + i}", InterfaceName = adapter });
+            }
+        }
+        Add("steam", 4120, "Wi-Fi 2", "192.168.7.7", 14, 0);
+        Add("steamwebhelper", 4188, "Wi-Fi 2", "192.168.7.7", 6, 0);
+        Add("HaloInfinite", 7788, "Ethernet", "192.168.0.51", 3, 2);
+        Add("Discord", 5021, "Ethernet", "192.168.0.51", 4, 1);
+        Add("brave", 9001, "Wi-Fi 2", "192.168.7.7", 9, 1);
+        Add("svchost", 1200, "Wi-Fi 2", "192.168.7.7", 2, 0);
+        Add("Spotify", 6400, null, "0.0.0.0", 0, 3);
+        return Task.FromResult<IReadOnlyList<ConnectionDto>>(list);
+    }
 
     public Task<ServiceStatusDto> GetStatusAsync(CancellationToken ct = default)
     {
