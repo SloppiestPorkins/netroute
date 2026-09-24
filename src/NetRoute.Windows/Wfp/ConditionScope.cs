@@ -99,6 +99,21 @@ internal sealed class ConditionScope : IDisposable
         };
     }
 
+    /// <summary>
+    /// Matches loopback traffic, including the AppContainer loopback that Store apps use.
+    /// The documented way to recognise loopback, and wider than the loopback adapter's LUID.
+    /// </summary>
+    public FWPM_FILTER_CONDITION0 LoopbackFlags() => new()
+    {
+        fieldKey = FWPM_CONDITION_FLAGS,
+        matchType = FwpMatchType.FlagsAnySet,
+        conditionValue = new FWP_VALUE0
+        {
+            type = FwpDataType.Uint32,
+            value = (IntPtr)(FWP_CONDITION_FLAG_IS_LOOPBACK | FWP_CONDITION_FLAG_IS_APPCONTAINER_LOOPBACK)
+        }
+    };
+
     /// <summary>Matches a remote address range: an IPv4 address and mask, or an IPv6 prefix.</summary>
     public FWPM_FILTER_CONDITION0 RemoteRange(System.Net.IPAddress network, int prefixLength)
     {

@@ -166,7 +166,12 @@ static async Task<int> RemoveAsync(INetRouteClient client, string query)
 
 static AppStatusDto? SingleApp(ServiceStatusDto status, string query)
 {
-    var matches = status.Apps.Where(a => a.Rule.App.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    // An exact name wins, so "Minecraft" still works when "Minecraft Launcher" is also in the list.
+    var matches = status.Apps.Where(a => a.Rule.App.DisplayName.Equals(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    if (matches.Count == 0)
+    {
+        matches = status.Apps.Where(a => a.Rule.App.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
     if (matches.Count == 1)
     {
         return matches[0];

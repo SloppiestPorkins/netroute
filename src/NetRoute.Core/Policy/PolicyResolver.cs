@@ -88,6 +88,15 @@ public sealed class PolicyResolver
 
         reasons.Add(Reason.Ok($"You assigned {rule.App.DisplayName} to {rule.Role.DisplayName()}."));
 
+        // Some apps can't survive being moved. Breaking one quietly would be worse than not
+        // moving it, so this is decided here, where "Why?" can explain it (see LocalHostingApps).
+        if (LocalHostingApps.Includes(rule.App))
+        {
+            reasons.Add(Reason.Bad(LocalHostingApps.Explain(rule.App)));
+            reasons.Add(Reason.Ok("It works normally, on whichever connection Windows uses."));
+            return Plan(rule, EnforcementAction.None, null, false, reasons);
+        }
+
         var binding = config.BindingFor(rule.Role);
         if (binding is null)
         {

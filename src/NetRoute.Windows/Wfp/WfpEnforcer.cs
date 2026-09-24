@@ -90,11 +90,11 @@ public sealed class WfpEnforcer
             {
                 try
                 {
-                    ApplyLocalNetworkPermits();
+                    ApplyAlwaysPermits();
                 }
                 catch (WfpException)
                 {
-                    // Local-network traffic then simply follows each app's rule, as it used to.
+                    // Local traffic then simply follows each app's rule, as it used to.
                 }
             }
         });
@@ -141,11 +141,14 @@ public sealed class WfpEnforcer
     /// NetRoute's own blocks, but live in NetRoute's sublayer, so Windows Firewall still decides
     /// independently: nothing here allows anything Windows Firewall blocks.
     /// </summary>
-    private void ApplyLocalNetworkPermits()
+    private void ApplyAlwaysPermits()
     {
         using var scope = new ConditionScope();
         foreach (var layer in V4Layers.Concat(V6Layers))
         {
+            // Loopback, including the AppContainer loopback a Store app uses to talk to itself.
+            AddFilter(scope, layer, [scope.LoopbackFlags()], FWP_ACTION_PERMIT, WeightLoopbackPermit, "Loopback");
+
             var v6 = V6Layers.Contains(layer);
             foreach (var (network, prefix) in LocalNetwork.Ranges.Where(r => (r.Network.AddressFamily == AddressFamily.InterNetworkV6) == v6))
             {

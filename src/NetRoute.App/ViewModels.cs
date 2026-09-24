@@ -752,6 +752,7 @@ public partial class AddAppViewModel(MainViewModel main) : ObservableObject
     public ObservableCollection<DestinationChoice> Destinations { get; } = [];
 
     [ObservableProperty] private string _category = "Games";
+    [ObservableProperty] private string? _warning;
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private bool _loading = true;
     [ObservableProperty] private int _step = 1;
@@ -841,6 +842,10 @@ public partial class AddAppViewModel(MainViewModel main) : ObservableObject
         {
             Destinations.Add(d);
         }
+        // Said before the choice, not after it goes wrong (see LocalHostingApps).
+        Warning = Selected is { } choice && LocalHostingApps.Includes(choice.App.Identity)
+            ? LocalHostingApps.Explain(choice.App.Identity)
+            : null;
         OnPropertyChanged(nameof(SelectedName));
         Step = 2;
     }

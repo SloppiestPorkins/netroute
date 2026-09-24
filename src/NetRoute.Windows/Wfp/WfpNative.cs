@@ -31,6 +31,8 @@ internal static class WfpNative
         new("71bc78fa-f17c-4997-a602-6abb261f351c");
     internal static readonly Guid FWPM_CONDITION_IP_LOCAL_INTERFACE =
         new("4cd62a49-59c3-4969-b7f3-bda5d32890a4");
+    internal static readonly Guid FWPM_CONDITION_FLAGS =
+        new("632ce23b-5167-435c-86d7-e903684aa80c");
     internal static readonly Guid FWPM_CONDITION_IP_REMOTE_ADDRESS =
         new("b235ae9a-1d64-49b8-a44c-5ff3d9095045");
     internal static readonly Guid FWPM_CONDITION_ALE_USER_ID =
@@ -57,8 +59,13 @@ internal static class WfpNative
     internal enum FwpMatchType : uint
     {
         Equal = 0,
-        NotEqual = 5
+        FlagsAnySet = 7,
+        NotEqual = 10
     }
+
+    // FWP_CONDITION_FLAG_* (fwptypes.h), used with FWPM_CONDITION_FLAGS.
+    internal const uint FWP_CONDITION_FLAG_IS_LOOPBACK = 0x00000001;
+    internal const uint FWP_CONDITION_FLAG_IS_APPCONTAINER_LOOPBACK = 0x00400000;
 
     internal const uint FWP_ACTION_FLAG_TERMINATING = 0x00001000;
     internal const uint FWP_ACTION_BLOCK = 0x00000001 | FWP_ACTION_FLAG_TERMINATING;

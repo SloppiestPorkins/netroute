@@ -86,3 +86,28 @@ Steam launches is split by its own path, not by Steam's.
   those apps (§23).
 - Not yet checked: the Windows Firewall sublayer's weight on this machine, which would
   confirm the "low weight" claim, and anti-cheat behaviour with the driver loaded.
+
+## What moving an app cannot do
+
+Moving an app onto a connection means the driver rewrites that app's socket binds. Mullvad's
+README lists the consequences, and says there are no generally applicable mitigations:
+
+- an excluded (moved) app **cannot bind `inaddr_any`/`in6addr_any`** — wildcard binds are
+  redirected to the address of the interface it was moved onto;
+- **multicast reception breaks**: the group join still happens on `inaddr_any` while the socket
+  is bound to one interface, so arriving traffic doesn't match;
+- an excluded app **cannot reach localhost over UDP** unless it bound `127.0.0.1` itself;
+- exclusion is **inherited by child processes**, so a launcher's games inherit it too.
+
+That rules out moving any app that hosts or finds things on the local network. Minecraft is the
+worked example, and the reason `LocalHostingApps` exists: a LAN world is announced from a
+wildcard UDP socket to the multicast address `224.0.2.60:4445`, the game runs as a child of the
+launcher, and the launcher is built on CEF, which talks to localhost. Moving it breaks LAN
+worlds and can stop it starting (seen on 24 September 2026: sockets rewritten onto the Ethernet
+IPv6 address, and `Minecraft.exe` faulting inside `libcef.dll`).
+
+NetRoute therefore resolves those apps to "no enforcement" and explains that in "Why?", rather
+than appearing to protect an app it has broken. Everything else still applies to them: they are
+never blocked, and they use whichever connection Windows picks.
+
+Source: <https://github.com/mullvad/win-split-tunnel> (README, "Limitations").

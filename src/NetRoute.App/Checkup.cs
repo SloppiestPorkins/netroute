@@ -131,6 +131,23 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
                 "Move to Downloads", () => MoveToDownloads(browser)));
         }
 
+        foreach (var app in status.Apps.Where(a => a.Rule.Role != RoleId.Default && LocalHostingApps.Includes(a.Rule.App)))
+        {
+            items.Add(HealthItem.Tip($"{app.Rule.App.DisplayName} isn't moved", LocalHostingApps.Explain(app.Rule.App),
+                "Set to Windows routing", () => main.Run(
+                    () => client.UpdateRuleAsync(app.Rule with { Role = RoleId.Default, Mode = RoutingMode.Default }),
+                    $"{app.Rule.App.DisplayName} now uses Windows routing.")));
+        }
+
+        // The same app added twice: once by name and once by the new-game prompt, say.
+        foreach (var same in status.Apps.GroupBy(a => DuplicateKey(a.Rule.App)).Where(g => g.Count() > 1))
+        {
+            var extra = same.Skip(1).First();
+            items.Add(HealthItem.Problem($"{same.First().Rule.App.DisplayName} is in your list twice",
+                $"\"{same.First().Rule.App.DisplayName}\" and \"{extra.Rule.App.DisplayName}\" are the same program, and two rules for one app can disagree.",
+                "Remove the duplicate", () => main.Run(() => client.RemoveRuleAsync(extra.Rule.Id), $"Removed the duplicate {extra.Rule.App.DisplayName}.")));
+        }
+
         if (status.SystemDownloads is { } system)
         {
             if (!system.Enabled)
@@ -260,6 +277,21 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
 
     private static AppIdentity IdentityOf(AppRateDto rate, string name)
         => rate.PackageFamilyName is { } package ? AppIdentity.ForPackage(package, name) : AppIdentity.ForExecutable(rate.ExecutablePath!, name);
+
+    /// <summary>What two rules must share to be the same app: a package, or the same program.</summary>
+    private static string DuplicateKey(AppIdentity app)
+    {
+        if (app.PackageFamilyName is { } family)
+        {
+            return "pkg:" + family.Split('_')[0].ToLowerInvariant();
+        }
+        var path = app.ExecutablePath ?? app.DisplayName;
+        const string store = @"\WindowsApps\";
+        var at = path.IndexOf(store, StringComparison.OrdinalIgnoreCase);
+        return at < 0
+            ? "exe:" + path.ToLowerInvariant()
+            : "pkg:" + path[(at + store.Length)..].Split('\\')[0].Split('_')[0].ToLowerInvariant();
+    }
 
     private static bool IsWindowsComponent(string path)
         => path.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase);
@@ -409,7 +441,12 @@ public static class NewGameDetector
                 continue;
             }
             var identity = connection.PackageFamilyName is { } package ? AppIdentity.ForPackage(package, name) : AppIdentity.ForExecutable(path, name);
-            return new NewGamePrompt(name, root, identity with { InstallLocation = root });
+            identity = identity with { InstallLocation = root };
+            if (LocalHostingApps.Includes(identity))
+            {
+                continue;   // NetRoute wouldn't move it anyway, so don't offer to.
+            }
+            return new NewGamePrompt(name, root, identity);
         }
         return null;
     }
