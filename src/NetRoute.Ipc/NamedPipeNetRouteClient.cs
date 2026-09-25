@@ -29,6 +29,7 @@ public sealed class NamedPipeNetRouteClient(string? pipeName = null) : INetRoute
     public Task<SelfTestDto> StartSelfTestAsync(CancellationToken ct = default) => CallAsync<SelfTestDto>(IpcCommands.StartSelfTest, null, ct);
     public Task<SelfTestDto> GetSelfTestAsync(CancellationToken ct = default) => CallAsync<SelfTestDto>(IpcCommands.GetSelfTest, null, ct);
     public Task<UsageHistoryDto> GetUsageHistoryAsync(int days, CancellationToken ct = default) => CallAsync<UsageHistoryDto>(IpcCommands.GetUsageHistory, new UsageHistoryRequest(days), ct);
+    public Task<IReadOnlyList<ConnectionHistoryDto>> GetConnectionHistoryAsync(int limit, CancellationToken ct = default) => CallAsync<IReadOnlyList<ConnectionHistoryDto>>(IpcCommands.GetConnectionHistory, new UsageHistoryRequest(limit), ct);
     public Task EmergencyDisableAsync(CancellationToken ct = default) => CallAsync<object?>(IpcCommands.EmergencyDisable, null, ct);
     public Task<RouteFixResultDto> FixRouteTieAsync(CancellationToken ct = default) => CallAsync<RouteFixResultDto>(IpcCommands.FixRouteTie, null, ct);
 

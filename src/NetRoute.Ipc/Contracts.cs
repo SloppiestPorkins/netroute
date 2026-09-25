@@ -188,6 +188,9 @@ public sealed record ServiceStatusDto
     /// <summary>A newer version, when one was found. Null unless an update feed is configured.</summary>
     public UpdateDto? Update { get; init; }
 
+    /// <summary>Downloads in progress, so the app can say what is being fetched, not just how fast.</summary>
+    public IReadOnlyList<DownloadActivityDto> Downloading { get; init; } = [];
+
     public IpcError? LastError { get; init; }
     public required DateTimeOffset GeneratedAt { get; init; }
 }
@@ -199,6 +202,20 @@ public sealed record ServiceStatusDto
 public sealed record RouteTieDto(IReadOnlyList<string> AdapterNames, string Message);
 
 public sealed record RouteFixResultDto(bool Fixed, string Message);
+
+/// <param name="Host">A resolved name where there is one, otherwise the address itself.</param>
+public sealed record ConnectionHistoryDto(
+    string App,
+    string Host,
+    string Address,
+    string? Adapter,
+    TransportProtocol Protocol,
+    DateTimeOffset First,
+    DateTimeOffset Last,
+    int Seen);
+
+/// <summary>What a download app is working on, read from its own files (see SteamDownloads).</summary>
+public sealed record DownloadActivityDto(string App, string Item, double BytesRemaining);
 
 /// <summary>A newer NetRoute, when the user has configured somewhere to look for one.</summary>
 public sealed record UpdateDto(string Version, string Url, string? Notes);

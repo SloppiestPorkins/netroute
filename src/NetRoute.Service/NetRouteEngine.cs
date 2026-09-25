@@ -51,6 +51,7 @@ public sealed class NetRouteEngine : IDisposable
     private readonly SelfTestRunner? _selfTest;
     private readonly IUsageHistory _history;
     private readonly IUpdateSource _updates;
+    private readonly IConnectionHistory _connectionHistory;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _systemDownloadsError;
     private readonly List<ServiceEventDto> _events = [];
@@ -75,9 +76,11 @@ public sealed class NetRouteEngine : IDisposable
         IAppRateSource? rates = null,
         SelfTestRunner? selfTest = null,
         IUsageHistory? history = null,
-        IUpdateSource? updates = null)
+        IUpdateSource? updates = null,
+        IConnectionHistory? connectionHistory = null)
     {
         _updates = updates ?? new NoUpdates();
+        _connectionHistory = connectionHistory ?? new NoConnectionHistory();
         _links = links ?? new NoLinkQuality();
         _rates = rates ?? new NoAppRates();
         _selfTest = selfTest;
@@ -136,6 +139,7 @@ public sealed class NetRouteEngine : IDisposable
                 RecentLeaks = verifications.Values.SelectMany(v => v.Leaks).OrderByDescending(l => l.At).ToList(),
                 RecentEvents = _events.ToList(),
                 Update = _updates.Available,
+                Downloading = Downloading(),
                 RouteTie = tie is null ? null : new RouteTieDto(tie.Adapters.Select(a => a.Name).ToList(),
                     $"{tie.Names} are tied as Windows' default connection, so Windows splits traffic between them " +
                     "and a download can use both at once."),
@@ -364,6 +368,33 @@ public sealed class NetRouteEngine : IDisposable
     }
 
     public UsageHistoryDto GetUsageHistory(int days) => _history.Summarise(days);
+
+    public IReadOnlyList<ConnectionHistoryDto> GetConnectionHistory(int limit) => _connectionHistory.Recent(limit);
+
+    private IReadOnlyList<DownloadActivityDto> _downloading = [];
+    private DateTimeOffset _downloadingAt = DateTimeOffset.MinValue;
+
+    /// <summary>What the download apps are fetching. Read from disk, so cached for a few seconds.</summary>
+    private IReadOnlyList<DownloadActivityDto> Downloading()
+    {
+        if (DateTimeOffset.UtcNow - _downloadingAt < TimeSpan.FromSeconds(10))
+        {
+            return _downloading;
+        }
+        try
+        {
+            _downloading = NetRoute.Windows.Apps.SteamDownloads.InProgress()
+                .Select(d => new DownloadActivityDto("Steam", d.Game, d.BytesRemaining))
+                .Take(5)
+                .ToList();
+        }
+        catch (Exception)
+        {
+            _downloading = [];
+        }
+        _downloadingAt = DateTimeOffset.UtcNow;
+        return _downloading;
+    }
 
     private RouteTie? FindTie(IReadOnlyList<NetworkAdapter> adapters)
     {

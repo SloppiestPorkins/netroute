@@ -112,6 +112,7 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
                 IpcCommands.StartSelfTest => await engine.StartSelfTestAsync(ct),
                 IpcCommands.GetSelfTest => engine.GetSelfTest(),
                 IpcCommands.GetUsageHistory => engine.GetUsageHistory(Payload<UsageHistoryRequest>(request).Days),
+                IpcCommands.GetConnectionHistory => engine.GetConnectionHistory(Payload<UsageHistoryRequest>(request).Days),
                 _ => throw new NetRouteServiceException(new IpcError { FriendlyMessage = "NetRoute does not recognize that command.", TechnicalDetail = $"Unknown command: {request.Command}" })
             };
             return new IpcResponse { Ok = true, Payload = value is null ? null : JsonSerializer.SerializeToElement(value, IpcProtocol.JsonOptions) };

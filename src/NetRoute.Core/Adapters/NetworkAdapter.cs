@@ -92,9 +92,12 @@ public sealed record NetworkAdapter
     public bool IsIpv4Only => Ipv4Address is not null && !HasIpv6Gateway;
 
     /// <summary>Whether this adapter is a sensible thing to offer as a Gaming/Downloads target.</summary>
-    public bool IsSelectableAsRole =>
-        State is AdapterState.Connected &&
-        Kind is not (AdapterKind.Loopback or AdapterKind.Virtual);
+    /// <summary>
+    /// Connected means it has a gateway (see AdapterDiscovery), so a VPN or tunnel that really
+    /// carries traffic qualifies and a Hyper-V switch with no way out does not. Excluding every
+    /// virtual adapter would rule out the sensible "downloads through the VPN, games direct" setup.
+    /// </summary>
+    public bool IsSelectableAsRole => State is AdapterState.Connected && Kind is not AdapterKind.Loopback;
 
     /// <summary>e.g. "1 Gbps", "866 Mbps". Empty when the speed is not meaningful.</summary>
     public string LinkSpeedDisplay => LinkSpeedBps switch

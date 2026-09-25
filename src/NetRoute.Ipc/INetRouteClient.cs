@@ -65,4 +65,7 @@ public interface INetRouteClient
 
     /// <summary>Per-day and per-app usage for the last <paramref name="days"/> days.</summary>
     Task<UsageHistoryDto> GetUsageHistoryAsync(int days, CancellationToken ct = default);
+
+    /// <summary>Where apps have been connecting recently, newest first.</summary>
+    Task<IReadOnlyList<ConnectionHistoryDto>> GetConnectionHistoryAsync(int limit, CancellationToken ct = default);
 }

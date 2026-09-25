@@ -616,6 +616,7 @@ public partial class HistoryViewModel(MainViewModel main) : ObservableObject
 
     public ObservableCollection<HistoryRow> Days { get; } = [];
     public ObservableCollection<HistoryRow> Apps { get; } = [];
+    public ObservableCollection<ConnectionRow> Connections { get; } = [];
 
     [ObservableProperty] private string? _note = "Reading…";
 
@@ -653,6 +654,19 @@ public partial class HistoryViewModel(MainViewModel main) : ObservableObject
             Apps.Add(Row($"{app.App}  ·  {app.Adapter}", app.Adapter, app.DownBytes, app.UpBytes, biggestApp));
         }
 
+        try
+        {
+            foreach (var seen in await main.Client.GetConnectionHistoryAsync(40))
+            {
+                Connections.Add(new ConnectionRow(seen.App, seen.Host, seen.Adapter ?? "not tied to one network",
+                    $"{seen.Protocol.ToString().ToUpperInvariant()}  ·  {seen.Last:HH:mm}"));
+            }
+        }
+        catch (Exception ex) when (ex is ServiceUnavailableException or NetRouteServiceException)
+        {
+            // An older service without this command: the rest of the screen still works.
+        }
+
         Note = history.Days.Count == 0
             ? "Nothing recorded yet. NetRoute writes usage while your apps are actually using the network."
             : null;
@@ -685,3 +699,5 @@ public partial class HistoryViewModel(MainViewModel main) : ObservableObject
 }
 
 public sealed record HistoryRow(string Title, string Detail, double BarWidth, Brush Accent);
+
+public sealed record ConnectionRow(string App, string Host, string Adapter, string Detail);

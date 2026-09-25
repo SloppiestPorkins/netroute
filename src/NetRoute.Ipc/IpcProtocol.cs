@@ -50,6 +50,7 @@ public static class IpcCommands
     public const string StartSelfTest = "startSelfTest";
     public const string GetSelfTest = "getSelfTest";
     public const string GetUsageHistory = "getUsageHistory";
+    public const string GetConnectionHistory = "getConnectionHistory";
 }
 
 public sealed record IpcRequest

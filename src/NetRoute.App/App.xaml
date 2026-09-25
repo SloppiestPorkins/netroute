@@ -10,6 +10,7 @@
             </ResourceDictionary.MergedDictionaries>
             <local:EqualsVisibilityConverter x:Key="PageVisibility" />
             <local:NullVisibilityConverter x:Key="NullVisibility" />
+            <local:CountVisibilityConverter x:Key="CountVisibility" />
             <local:BoolVisibilityConverter x:Key="BoolVisibility" />
         </ResourceDictionary>
     </Application.Resources>

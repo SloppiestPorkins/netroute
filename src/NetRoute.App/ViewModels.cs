@@ -186,6 +186,13 @@ public partial class MainViewModel : ObservableObject
         CheckupText = issues > 0 ? $"Check-up · {issues}" : "Check-up";
 
         SyncRoles(status.Roles);
+        var downloading = status.Downloading;
+        foreach (var card in Roles)
+        {
+            card.Activity = card.Role == RoleId.Downloads && downloading.Count > 0
+                ? string.Join("   ", downloading.Take(2).Select(d => $"{d.App} is fetching {d.Item} · {Format.Bytes(d.BytesRemaining)} to go"))
+                : null;
+        }
         SyncApps(apps);
         RaiseNotifications(status.RecentEvents);
     }
@@ -633,6 +640,9 @@ public partial class RoleCardViewModel(RoleId role) : ObservableObject
     [ObservableProperty] private Brush _healthBrush = Ui.Res("MutedBrush");
     [ObservableProperty] private string? _note;
 
+    /// <summary>What is being downloaded right now, when anything is.</summary>
+    [ObservableProperty] private string? _activity;
+
     public void Update(RoleStatusDto r)
     {
         AdapterName = r.Adapter?.Name ?? r.LastKnownName ?? "Not chosen";
@@ -746,7 +756,12 @@ public sealed record DestinationChoice(RoleId Role, string Title, string Subtitl
 public sealed record AdapterChoice(AdapterDto Dto)
 {
     public string Name => Dto.Name;
-    public string Line => string.Join("  ·  ", new[] { Dto.Description, Dto.LinkSpeed, Dto.HasIpv6Route ? null : "IPv4 only" }.Where(s => !string.IsNullOrEmpty(s)));
+    public string Line => string.Join("  ·  ", new[]
+    {
+        Dto.Description,
+        Dto.Kind == AdapterKind.Virtual ? "VPN or tunnel" : Dto.LinkSpeed,
+        Dto.HasIpv6Route ? null : "IPv4 only"
+    }.Where(s => !string.IsNullOrEmpty(s)));
     public string StateText => Dto.State == AdapterState.Connected ? "Connected" : Dto.State.ToString();
     public Brush StateBrush => Ui.Res(Dto.State == AdapterState.Connected ? "GoodBrush" : "WarnBrush");
     public string Glyph => Dto.Kind == AdapterKind.WiFi ? "" : Dto.Kind == AdapterKind.Cellular ? "" : "";
@@ -965,10 +980,18 @@ public partial class ChangeNetworkViewModel : ObservableObject
         _main = main;
         _app = app;
         Destinations = DestinationChoice.For(main.Status, app.Rule.Role);
+        FallBackWhenDown = app.Rule.Mode == RoutingMode.Preferred;
     }
 
     public string Title => $"Where should {_app.Rule.App.DisplayName} connect?";
     public IReadOnlyList<DestinationChoice> Destinations { get; }
+
+    /// <summary>
+    /// What to do when the chosen connection is down: block (the kill switch, which is the point
+    /// of Strict mode) or let Windows use the other one. Blocking is the default because silently
+    /// using the other connection is the failure the whole app exists to prevent.
+    /// </summary>
+    [ObservableProperty] private bool _fallBackWhenDown;
 
     [RelayCommand]
     private async Task Choose(DestinationChoice destination)
@@ -981,7 +1004,9 @@ public partial class ChangeNetworkViewModel : ObservableObject
         var updated = _app.Rule with
         {
             Role = destination.Role,
-            Mode = destination.Role == RoleId.Default ? RoutingMode.Default : RoutingMode.Strict
+            Mode = destination.Role == RoleId.Default ? RoutingMode.Default
+                : FallBackWhenDown ? RoutingMode.Preferred : RoutingMode.Strict,
+            KillSwitch = !FallBackWhenDown
         };
         await _main.Run(() => _main.Client.UpdateRuleAsync(updated), $"{_app.Rule.App.DisplayName} now uses {destination.Title}.");
     }

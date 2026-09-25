@@ -246,6 +246,18 @@ public sealed class DemoNetRouteClient : INetRouteClient
         ], null, @"C:\ProgramData\NetRoute\history"));
     }
 
+    public Task<IReadOnlyList<ConnectionHistoryDto>> GetConnectionHistoryAsync(int limit, CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.Now;
+        return Task.FromResult<IReadOnlyList<ConnectionHistoryDto>>(
+        [
+            new ConnectionHistoryDto("steam", "cache1-lhr1.steamcontent.com", "23.62.98.14", "Wi-Fi 2", TransportProtocol.Tcp, now.AddMinutes(-42), now.AddMinutes(-1), 214),
+            new ConnectionHistoryDto("HaloInfinite", "halo-live.azurewebsites.net", "20.42.73.15", "Ethernet", TransportProtocol.Udp, now.AddHours(-2), now.AddMinutes(-3), 88),
+            new ConnectionHistoryDto("Discord", "gateway-us-east1-b.discord.gg", "35.227.51.4", "Ethernet", TransportProtocol.Tcp, now.AddHours(-5), now.AddMinutes(-1), 17),
+            new ConnectionHistoryDto("steamwebhelper", "your network", "192.168.0.81", "Ethernet", TransportProtocol.Tcp, now.AddHours(-9), now.AddHours(-9), 1)
+        ]);
+    }
+
     public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default)
     {
         AppRateDto Rate(string name, int pid, string adapter, double downMb, double upKb, string? path = null) => new()
