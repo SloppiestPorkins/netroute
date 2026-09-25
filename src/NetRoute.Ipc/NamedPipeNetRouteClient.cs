@@ -25,6 +25,7 @@ public sealed class NamedPipeNetRouteClient(string? pipeName = null) : INetRoute
     public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default) => CallAsync<AppRatesDto>(IpcCommands.GetAppRates, null, ct);
     public Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetSystemDownloads, new SetSystemDownloadsRequest(enabled), ct);
     public Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetPauseDownloads, new SetPauseDownloadsRequest(enabled), ct);
+    public Task SetQuietHoursAsync(int? fromHour, int? toHour, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetQuietHours, new SetQuietHoursRequest(fromHour, toHour), ct);
     public Task<SelfTestDto> StartSelfTestAsync(CancellationToken ct = default) => CallAsync<SelfTestDto>(IpcCommands.StartSelfTest, null, ct);
     public Task<SelfTestDto> GetSelfTestAsync(CancellationToken ct = default) => CallAsync<SelfTestDto>(IpcCommands.GetSelfTest, null, ct);
     public Task<UsageHistoryDto> GetUsageHistoryAsync(int days, CancellationToken ct = default) => CallAsync<UsageHistoryDto>(IpcCommands.GetUsageHistory, new UsageHistoryRequest(days), ct);

@@ -166,6 +166,18 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             }
         }
 
+        // Said once, plainly, because it is the one gap a user can't see and every tool of this
+        // kind has it: ForceBindIP and Mullvad's driver both hit exactly the same thing.
+        if (status.Roles.Any(r => r.Adapter is { DnsServers.Count: > 0 }))
+        {
+            var servers = status.Roles.Where(r => r.Adapter is { DnsServers.Count: > 0 })
+                .Select(r => $"{r.Role.DisplayName()} asks {string.Join(", ", r.Adapter!.DnsServers.Take(2))}");
+            items.Add(HealthItem.Tip("Name lookups don't follow your app rules",
+                "Windows looks up names in its own service, not inside the app, so a lookup can leave by the other " +
+                "connection even when the app's traffic can't. It affects which names were asked for, never where the " +
+                "traffic itself goes. " + string.Join(". ", servers) + "."));
+        }
+
         if (status.DownloadsPause is { } pause)
         {
             var oneConnection = status.Roles.Where(r => r.Adapter is not null).Select(r => r.Adapter!.Luid).Distinct().Count() == 1;
@@ -181,9 +193,23 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             else
             {
                 items.Add(HealthItem.Fine(
-                    pause.PausedFor is { } game ? $"Downloads are paused while {game} runs" : "Downloads pause while you play",
-                    "They start again by themselves when you stop playing.", "Turn off",
+                    pause.PausedFor is { } reason ? $"Downloads are paused: {reason}" : "Downloads pause while you play",
+                    "They start again by themselves, and anything half-downloaded carries on.", "Turn off",
                     () => main.Run(() => client.SetPauseDownloadsAsync(false), "Downloads keep running while you play.")));
+            }
+
+            if (pause.QuietHours is { } window)
+            {
+                items.Add(HealthItem.Fine($"Downloads are held back between {window}", "Your scheduled quiet hours.", "Stop that",
+                    () => main.Run(() => client.SetQuietHoursAsync(null, null), "Quiet hours are off.")));
+            }
+            else
+            {
+                items.Add(HealthItem.Tip("Downloads can be held back at set times",
+                    "If you usually play in the evening, NetRoute can block the download apps then, whatever else is happening. " +
+                    "Other hours: netroute quiet-hours 20 23.",
+                    "Hold them 6pm to 11pm",
+                    () => main.Run(() => client.SetQuietHoursAsync(18, 23), "Downloads are held back between 18:00 and 23:00.")));
             }
         }
 

@@ -169,7 +169,7 @@ public sealed class NetRouteEngineTests : IDisposable
 
     private sealed class ThrowingResolver : IPolicyPlanResolver
     {
-        public EnforcementPlan Resolve(NetRouteConfig config, bool gamingActive = false, string? gameName = null)
+        public EnforcementPlan Resolve(NetRouteConfig config, string? pauseDownloadsBecause = null)
             => throw new InvalidOperationException("resolver failure");
     }
 }

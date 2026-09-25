@@ -108,6 +108,7 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
                 IpcCommands.GetAppRates => engine.GetAppRates(),
                 IpcCommands.SetSystemDownloads => await SetSystemDownloads(request, ct),
                 IpcCommands.SetPauseDownloads => await SetPauseDownloads(request, ct),
+                IpcCommands.SetQuietHours => await SetQuietHours(request, ct),
                 IpcCommands.StartSelfTest => await engine.StartSelfTestAsync(ct),
                 IpcCommands.GetSelfTest => engine.GetSelfTest(),
                 IpcCommands.GetUsageHistory => engine.GetUsageHistory(Payload<UsageHistoryRequest>(request).Days),
@@ -130,6 +131,7 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
     private async Task<object?> SetPaused(IpcRequest r, CancellationToken ct) { var p = Payload<SetPausedRequest>(r); await engine.SetEnforcementPausedAsync(p.Paused, p.Minutes, ct); return null; }
     private async Task<object?> SetSystemDownloads(IpcRequest r, CancellationToken ct) { await engine.SetSystemDownloadsAsync(Payload<SetSystemDownloadsRequest>(r).Enabled, ct); return null; }
     private async Task<object?> SetPauseDownloads(IpcRequest r, CancellationToken ct) { await engine.SetPauseDownloadsAsync(Payload<SetPauseDownloadsRequest>(r).Enabled, ct); return null; }
+    private async Task<object?> SetQuietHours(IpcRequest r, CancellationToken ct) { var p = Payload<SetQuietHoursRequest>(r); await engine.SetQuietHoursAsync(p.FromHour, p.ToHour, ct); return null; }
     private async Task<object?> EmergencyDisable(CancellationToken ct) { await engine.EmergencyDisableAsync(ct); return null; }
     private static IpcResponse Failure(Exception ex) => ex is NetRouteServiceException service
         ? new() { Ok = false, Error = service.Error }

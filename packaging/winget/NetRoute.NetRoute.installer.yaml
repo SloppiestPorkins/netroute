@@ -1,0 +1,32 @@
+PackageIdentifier: NetRoute.NetRoute
+PackageVersion: 1.0.0
+MinimumOSVersion: 10.0.19041.0
+InstallerType: exe
+Scope: machine
+InstallModes:
+  - interactive
+  - silent
+InstallerSwitches:
+  Silent: /quiet
+  SilentWithProgress: /quiet
+UpgradeBehavior: install
+# NetRoute installs a Windows service and registers a kernel driver, so it needs administrator rights.
+ElevationRequirement: elevatesSelf
+AppsAndFeaturesEntries:
+  - DisplayName: NetRoute
+    DisplayVersion: 1.0.0
+    Publisher: NetRoute
+    ProductCode: NetRoute
+    UpgradeCode: NetRoute
+InstallationNotes: |-
+  NetRoute keeps your games on one internet connection and your downloads on another.
+  It installs a Windows service, and Mullvad's Microsoft-signed split-tunnel driver
+  (MPL-2.0) so apps can be moved between connections.
+Installers:
+  # Filled in at release: the published URL of dist\NetRoute-Setup-<version>.exe and its SHA-256
+  # (scripts/build-installer.ps1 prints the hash).
+  - Architecture: x64
+    InstallerUrl: https://example.invalid/NetRoute-Setup-1.0.0.exe
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+ManifestType: installer
+ManifestVersion: 1.6.0

@@ -16,6 +16,7 @@ const string Usage = """
           pause [minutes] | resume       stop or restart enforcement, keeping your rules
           system-downloads on|off        keep Windows Update, Store and Xbox downloads on Downloads
           pause-downloads on|off         pause download apps while a game is running
+          quiet-hours <from> <to>|off    hold downloads between these hours, e.g. quiet-hours 18 23
           selftest                       prove the separation works, end to end
           history [days]                 how much each app used, per connection
           emergency-disable              remove every NetRoute rule from Windows right now
@@ -73,6 +74,14 @@ static async Task<int> RunAsync(string[] args)
                     : "Download apps keep running while you play.");
                 break;
             }
+            case "quiet-hours" when args.Length > 1 && args[1] == "off":
+                await client.SetQuietHoursAsync(null, null);
+                Console.WriteLine("Quiet hours are off.");
+                break;
+            case "quiet-hours" when args.Length > 2 && int.TryParse(args[1], out var from) && int.TryParse(args[2], out var to):
+                await client.SetQuietHoursAsync(from, to);
+                Console.WriteLine($"Downloads are held back between {from:00}:00 and {to:00}:00.");
+                break;
             case "selftest": return await SelfTestAsync(client);
             case "history": return await HistoryAsync(client, args.Length > 1 && int.TryParse(args[1], out var requested) ? requested : 7);
             case "cleanup-driver": return LocalCleanup(removeSublayers: args.Contains("--remove-sublayers"));
@@ -320,12 +329,15 @@ static void PrintStatus(ServiceStatusDto status)
     Console.WriteLine(status.EnforcementPaused
         ? status.PausedUntil is { } until ? $"Enforcement: paused until {until.ToLocalTime():HH:mm}" : "Enforcement: paused"
         : status.EnforcementActive ? "Enforcement: active" : "Enforcement: unavailable");
+    if (status.Update is { } update) Console.WriteLine($"Update: NetRoute {update.Version} is available - {update.Url}");
     if (status.SystemDownloads is { } system) Console.WriteLine($"Windows downloads: {system.Summary}");
-    if (status.DownloadsPause is { Enabled: true } pause)
+    if (status.DownloadsPause is { } pause && (pause.Enabled || pause.QuietHours is not null))
     {
-        Console.WriteLine(pause.PausedFor is { } game
-            ? $"Downloads: paused while {game} is running."
-            : "Downloads: will pause while a game is running.");
+        Console.WriteLine(pause.PausedFor is { } reason
+            ? $"Downloads: paused, {reason}."
+            : "Downloads: will pause"
+              + (pause.Enabled ? " while a game is running" : "")
+              + (pause.QuietHours is { } window ? $"{(pause.Enabled ? ", and" : "")} between {window}" : "") + ".");
     }
     if (status.LastError is { } error) Console.WriteLine($"Problem: {error.FriendlyMessage}");
     if (status.RedirectSummary is { } redirect) Console.WriteLine($"Moving apps: {redirect}");

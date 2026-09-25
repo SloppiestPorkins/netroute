@@ -33,12 +33,12 @@ public sealed class PauseAndHistoryTests : IDisposable
     [Fact]
     public void DownloadsAreBlockedOnlyWhileAGameIsRunning()
     {
-        var plan = Resolver().Resolve(Config(pause: true), gamingActive: true, gameName: "Halo Infinite");
+        var plan = Resolver().Resolve(Config(pause: true), "Halo Infinite is running");
         var steam = plan.Applications.Single(a => a.Rule.App.DisplayName == "Steam");
 
         Assert.Equal(EnforcementAction.BlockAll, steam.Action);
         Assert.Contains(steam.Reasons, r => r.Text.Contains("Halo Infinite", StringComparison.Ordinal));
-        Assert.Equal("Halo Infinite", plan.DownloadsPausedFor);
+        Assert.Equal("Halo Infinite is running", plan.DownloadsPausedFor);
         // The game itself is untouched by its own pause rule.
         Assert.Equal(EnforcementAction.PinToAdapter, plan.Applications.Single(a => a.Rule.App.DisplayName == "Halo Infinite").Action);
     }
@@ -48,11 +48,23 @@ public sealed class PauseAndHistoryTests : IDisposable
     {
         Assert.Equal(EnforcementAction.PinToAdapter,
             Resolver().Resolve(Config(pause: true)).Applications.Single(a => a.Rule.App.DisplayName == "Steam").Action);
+        // The engine decides the reason, so "setting off" means it passes none.
         Assert.Equal(EnforcementAction.PinToAdapter,
-            Resolver().Resolve(Config(pause: false), gamingActive: true, gameName: "Halo Infinite")
+            Resolver().Resolve(Config(pause: false))
                 .Applications.Single(a => a.Rule.App.DisplayName == "Steam").Action);
         Assert.Null(Resolver().Resolve(Config(pause: true)).DownloadsPausedFor);
     }
+
+    [Theory]
+    [InlineData(18, 23, 20, true)]
+    [InlineData(18, 23, 17, false)]
+    [InlineData(18, 23, 23, false)]
+    [InlineData(22, 2, 23, true)]    // an evening that runs past midnight
+    [InlineData(22, 2, 1, true)]
+    [InlineData(22, 2, 3, false)]
+    [InlineData(9, 9, 9, false)]     // an empty window blocks nothing
+    public void QuietHoursCoverTheRightHoursIncludingPastMidnight(int from, int to, int hour, bool inside)
+        => Assert.Equal(inside, new QuietHours(from, to).Contains(DateTime.Today.AddHours(hour)));
 
     [Fact]
     public void UsageIsRecordedPerAppAndConnectionAndSurvivesAReread()

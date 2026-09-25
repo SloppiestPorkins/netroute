@@ -46,6 +46,7 @@ public static class IpcCommands
     public const string GetAppRates = "getAppRates";
     public const string SetSystemDownloads = "setSystemDownloads";
     public const string SetPauseDownloads = "setPauseDownloads";
+    public const string SetQuietHours = "setQuietHours";
     public const string StartSelfTest = "startSelfTest";
     public const string GetSelfTest = "getSelfTest";
     public const string GetUsageHistory = "getUsageHistory";

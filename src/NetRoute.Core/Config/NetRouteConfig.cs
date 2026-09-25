@@ -4,6 +4,18 @@ using NetRoute.Core.Policy;
 
 namespace NetRoute.Core.Config;
 
+/// <summary>An hour range, which may wrap past midnight (22 to 2 is four hours of evening).</summary>
+public sealed record QuietHours(int FromHour, int ToHour)
+{
+    public bool Contains(DateTime now) => FromHour == ToHour
+        ? false
+        : FromHour < ToHour
+            ? now.Hour >= FromHour && now.Hour < ToHour
+            : now.Hour >= FromHour || now.Hour < ToHour;
+
+    public override string ToString() => $"{FromHour:00}:00 to {ToHour:00}:00";
+}
+
 public sealed record NetRouteConfig
 {
     public int Version { get; init; } = 1;
@@ -32,6 +44,15 @@ public sealed record NetRouteConfig
     /// with only one connection, where separating traffic isn't possible at all.
     /// </summary>
     public bool PauseDownloadsWhileGaming { get; init; }
+
+    /// <summary>Hours when Downloads apps are blocked whatever else is happening, e.g. your usual gaming evening.</summary>
+    public QuietHours? DownloadQuietHours { get; init; }
+
+    /// <summary>
+    /// Where to look for a newer NetRoute, as JSON: version, url, notes. Empty by default, since
+    /// a build nobody published has nowhere to look, and a check nobody asked for is a call home.
+    /// </summary>
+    public string? UpdateFeedUrl { get; init; }
 
     public RoleBinding? BindingFor(RoleId role)
         => RoleBindings.FirstOrDefault(b => b.Role == role);

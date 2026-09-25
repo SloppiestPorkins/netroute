@@ -24,7 +24,11 @@ public partial class MainWindow : Window
         _screenshot = screenshot;
         _screenshotView = screenshotView;
 
-        SourceInitialized += (_, _) => UseDarkTitleBar();
+        SourceInitialized += (_, _) =>
+        {
+            UseDarkTitleBar();
+            RegisterHotkeys();
+        };
         Loaded += OnLoaded;
         Closing += OnClosing;
         PreviewKeyDown += (_, e) =>
@@ -116,6 +120,57 @@ public partial class MainWindow : Window
         App.ExitRequested = true;
         Application.Current.Shutdown();
     }
+
+    /// <summary>
+    /// Ctrl+Alt+N brings NetRoute up, Ctrl+Alt+P pauses it for 15 minutes. Mid-game, reaching the
+    /// tray means leaving the game; a hotkey doesn't. If another program already owns a combination
+    /// Windows simply refuses it, which is not worth bothering the user about.
+    /// </summary>
+    private void RegisterHotkeys()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        RegisterHotKey(handle, HotkeyShow, ModControl | ModAlt, 'N');
+        RegisterHotKey(handle, HotkeyPause, ModControl | ModAlt, 'P');
+        HwndSource.FromHwnd(handle)?.AddHook(HotkeyHook);
+    }
+
+    private IntPtr HotkeyHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (message != WmHotkey)
+        {
+            return IntPtr.Zero;
+        }
+        switch ((int)wParam)
+        {
+            case HotkeyShow:
+                if (IsVisible && WindowState != WindowState.Minimized)
+                {
+                    Hide();
+                }
+                else
+                {
+                    Show();
+                    WindowState = WindowState.Normal;
+                    Activate();
+                }
+                handled = true;
+                break;
+            case HotkeyPause:
+                _vm.PauseForCommand.Execute(15);
+                handled = true;
+                break;
+        }
+        return IntPtr.Zero;
+    }
+
+    private const int WmHotkey = 0x0312;
+    private const int HotkeyShow = 1;
+    private const int HotkeyPause = 2;
+    private const uint ModAlt = 0x0001;
+    private const uint ModControl = 0x0002;
+
+    [DllImport("user32.dll")]
+    private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
 
     private void UseDarkTitleBar()
     {

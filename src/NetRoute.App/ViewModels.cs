@@ -61,6 +61,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private Brush _overallTint = Ui.Res("NeutralTintBrush");
     [ObservableProperty] private string? _banner;
     [ObservableProperty] private string? _routeTieText;
+    [ObservableProperty] private string? _updateText;
     [ObservableProperty] private string? _redirectText;
     [ObservableProperty] private string? _serviceProblem;
     [ObservableProperty] private object? _overlay;
@@ -173,6 +174,11 @@ public partial class MainViewModel : ObservableObject
         Banner = banners.Count == 0 ? null : string.Join("\n", banners);
         RouteTieText = status.RouteTie?.Message;
         RedirectText = status.RedirectSummary;
+        PauseDownloadsWhileGaming = status.DownloadsPause?.Enabled ?? false;
+        _updateUrl = status.Update?.Url;
+        UpdateText = status.Update is { } update
+            ? $"NetRoute {update.Version} is available. {update.Notes}".TrimEnd()
+            : null;
 
         // The problems the service already knows about. Check-up finds more when opened.
         var issues = (status.EnforcementPaused ? 1 : 0) + (status.RouteTie is null ? 0 : 1) + (status.RedirectionAvailable ? 0 : 1)
@@ -421,6 +427,14 @@ public partial class MainViewModel : ObservableObject
         await vm.LoadAsync();
     }
 
+    /// <summary>Set from status, so the tray can show the current setting without asking again.</summary>
+    [ObservableProperty] private bool _pauseDownloadsWhileGaming;
+
+    [RelayCommand]
+    public Task TogglePauseDownloads() => Run(
+        () => _client.SetPauseDownloadsAsync(!PauseDownloadsWhileGaming),
+        PauseDownloadsWhileGaming ? "Downloads keep running while you play." : "Downloads will pause while you play.");
+
     [RelayCommand]
     private Task OpenSelfTest() => OpenSelfTestAsync();
 
@@ -523,6 +537,27 @@ public partial class MainViewModel : ObservableObject
         if (result is not null)
         {
             ShowToast(result.Message);
+        }
+    }
+
+    private string? _updateUrl;
+
+    /// <summary>Opens the download page. NetRoute never installs an update by itself.</summary>
+    [RelayCommand]
+    private void GetUpdate()
+    {
+        if (_updateUrl is null)
+        {
+            return;
+        }
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_updateUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            ShowToast("Couldn't open the download page.");
         }
     }
 

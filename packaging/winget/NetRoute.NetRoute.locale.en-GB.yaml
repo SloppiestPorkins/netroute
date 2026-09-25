@@ -1,0 +1,21 @@
+PackageIdentifier: NetRoute.NetRoute
+PackageVersion: 1.0.0
+PackageLocale: en-GB
+Publisher: NetRoute
+PackageName: NetRoute
+License: See THIRD-PARTY-NOTICES.txt
+ShortDescription: Keeps your games on one internet connection and your downloads on the other.
+Description: |-
+  NetRoute assigns each app to a connection: games to the fast, low-latency one, downloads and
+  updates to the other. Rules are enforced with the Windows Filtering Platform and apps are moved
+  with Mullvad's Microsoft-signed split-tunnel driver, which NetRoute installs. It verifies from
+  real traffic rather than claiming success, and can prove the separation on demand by measuring
+  your gaming line's latency while the other connection downloads.
+Tags:
+  - gaming
+  - network
+  - latency
+  - bandwidth
+  - firewall
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

@@ -599,6 +599,18 @@
                     </DockPanel>
                 </Border>
 
+                <!-- A newer version is out -->
+                <Border Background="{StaticResource DownloadsTintBrush}" CornerRadius="10" Padding="14,10" Margin="0,16,0,0"
+                        Visibility="{Binding UpdateText, Converter={StaticResource NullVisibility}}">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Get it" VerticalAlignment="Center"
+                                Margin="14,0,0,0" Command="{Binding GetUpdateCommand}" />
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE896;" Foreground="{StaticResource DownloadsBrush}"
+                                   VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <TextBlock Text="{Binding UpdateText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
+
                 <!-- Two connections tied for Windows' default route: one-click fix -->
                 <Border Background="{StaticResource WarnTintBrush}" BorderBrush="#55F5A524" BorderThickness="1"
                         CornerRadius="10" Padding="14,10" Margin="0,16,0,0"

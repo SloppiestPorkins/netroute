@@ -55,6 +55,9 @@ public interface INetRouteClient
     /// <summary>Block Downloads apps while a Gaming app is running.</summary>
     Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default);
 
+    /// <summary>Block Downloads apps between these hours; pass nulls to stop.</summary>
+    Task SetQuietHoursAsync(int? fromHour, int? toHour, CancellationToken ct = default);
+
     /// <summary>Start the "prove it" test; poll <see cref="GetSelfTestAsync"/> while it runs.</summary>
     Task<SelfTestDto> StartSelfTestAsync(CancellationToken ct = default);
 

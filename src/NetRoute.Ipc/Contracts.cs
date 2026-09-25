@@ -25,6 +25,8 @@ public sealed record SetSystemDownloadsRequest(bool Enabled);
 
 public sealed record SetPauseDownloadsRequest(bool Enabled);
 
+public sealed record SetQuietHoursRequest(int? FromHour, int? ToHour);
+
 public sealed record UsageHistoryRequest(int Days);
 
 // ---- Responses ----
@@ -183,6 +185,9 @@ public sealed record ServiceStatusDto
     /// <summary>Set when Windows has no single default connection; null when it does.</summary>
     public RouteTieDto? RouteTie { get; init; }
 
+    /// <summary>A newer version, when one was found. Null unless an update feed is configured.</summary>
+    public UpdateDto? Update { get; init; }
+
     public IpcError? LastError { get; init; }
     public required DateTimeOffset GeneratedAt { get; init; }
 }
@@ -194,6 +199,9 @@ public sealed record ServiceStatusDto
 public sealed record RouteTieDto(IReadOnlyList<string> AdapterNames, string Message);
 
 public sealed record RouteFixResultDto(bool Fixed, string Message);
+
+/// <summary>A newer NetRoute, when the user has configured somewhere to look for one.</summary>
+public sealed record UpdateDto(string Version, string Url, string? Notes);
 
 /// <param name="Enabled">The user's setting.</param>
 /// <param name="Active">Filters are in place right now.</param>
@@ -232,7 +240,8 @@ public sealed record SelfTestDto(bool Running, DateTimeOffset? FinishedAt, IRead
 
 /// <param name="Enabled">The user's setting.</param>
 /// <param name="PausedFor">The game currently pausing the Downloads apps, when one is.</param>
-public sealed record DownloadsPauseDto(bool Enabled, string? PausedFor);
+/// <param name="QuietHours">The scheduled block, e.g. "18:00 to 23:00", or null when there isn't one.</param>
+public sealed record DownloadsPauseDto(bool Enabled, string? PausedFor, string? QuietHours = null);
 
 public sealed record UsageDayDto(string Day, string Adapter, double DownBytes, double UpBytes);
 

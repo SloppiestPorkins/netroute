@@ -71,6 +71,11 @@ public partial class App : Application
         {
             _window.Show();
         }
+        else if (screenshot is null)
+        {
+            // Give the hidden window a handle anyway, so the hotkeys work from the tray.
+            new System.Windows.Interop.WindowInteropHelper(_window).EnsureHandle();
+        }
     }
 
     public void OnWindowHidden()
@@ -112,6 +117,18 @@ public partial class App : Application
             pause.DropDownItems.Add(label, null, (_, _) => _vm?.PauseForCommand.Execute(minutes));
         }
         var resume = new Forms.ToolStripMenuItem("Resume protection", null, (_, _) => _vm?.ResumeCommand.Execute(null));
+        var prove = new Forms.ToolStripMenuItem("Prove it works…", null, (_, _) =>
+        {
+            ShowWindow();
+            _vm?.OpenSelfTestCommand.Execute(null);
+        });
+        var history = new Forms.ToolStripMenuItem("What used each network…", null, (_, _) =>
+        {
+            ShowWindow();
+            _vm?.OpenHistoryCommand.Execute(null);
+        });
+        var pauseDownloads = new Forms.ToolStripMenuItem("Pause downloads while I play", null,
+            (_, _) => _vm?.TogglePauseDownloadsCommand.Execute(null)) { CheckOnClick = false };
         var emergency = new Forms.ToolStripMenuItem("Emergency Disable…", null, (_, _) =>
         {
             ShowWindow();
@@ -127,7 +144,8 @@ public partial class App : Application
             Shutdown();
         });
 
-        menu.Items.AddRange([open, new Forms.ToolStripSeparator(), gaming, downloads, new Forms.ToolStripSeparator(), pause, resume, emergency, new Forms.ToolStripSeparator(), exit]);
+        menu.Items.AddRange([open, new Forms.ToolStripSeparator(), gaming, downloads, new Forms.ToolStripSeparator(),
+            prove, history, pauseDownloads, new Forms.ToolStripSeparator(), pause, resume, emergency, new Forms.ToolStripSeparator(), exit]);
         menu.Opening += (_, _) =>
         {
             var roles = _vm?.Roles;
@@ -135,6 +153,7 @@ public partial class App : Application
             downloads.Text = "⬇ Downloads: " + (roles?.FirstOrDefault(r => r.Role == Core.Policy.RoleId.Downloads) is { } d ? $"{d.AdapterName} ({d.HealthText})" : "not set");
             pause.Visible = _vm?.Paused != true;
             resume.Visible = _vm?.Paused == true;
+            pauseDownloads.Checked = _vm?.PauseDownloadsWhileGaming == true;
             resume.Text = _vm?.OverallText is { } text && text.StartsWith("Paused until", StringComparison.Ordinal)
                 ? $"Resume protection ({text.ToLowerInvariant()})" : "Resume protection";
         };

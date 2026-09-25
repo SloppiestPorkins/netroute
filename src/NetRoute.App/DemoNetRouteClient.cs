@@ -27,6 +27,7 @@ public sealed class DemoNetRouteClient : INetRouteClient
     private DateTimeOffset? _pausedUntil;
     private bool _systemDownloads = true;
     private bool _pauseDownloads;
+    private string? _quietHours;
     private SelfTestDto _selfTest = new(false, null, [], "Not run yet.");
 
     public DemoNetRouteClient(bool firstRun)
@@ -117,7 +118,7 @@ public sealed class DemoNetRouteClient : INetRouteClient
             SystemDownloads = _systemDownloads
                 ? new SystemDownloadsDto(true, !_paused, "On. Windows Update, Microsoft Store and Xbox app downloads are kept on Wi-Fi 2, with IPv6 blocked because Wi-Fi 2 has none.")
                 : new SystemDownloadsDto(false, false, "Off. Windows Update, Microsoft Store and Xbox app downloads use whichever connection Windows picks."),
-            DownloadsPause = new DownloadsPauseDto(_pauseDownloads, null),
+            DownloadsPause = new DownloadsPauseDto(_pauseDownloads, null, _quietHours),
             RedirectionAvailable = true,
             RedirectSummary = $"On. {_rules.Count(r => r.Role == RoleId.Gaming)} Gaming apps are moved onto Ethernet; Wi-Fi 2 is Windows' default connection.",
             Roles = [Role(RoleId.Gaming, _adapters[0], 12, 0), Role(RoleId.Downloads, _adapters[1], 21, 0.4)],
@@ -199,6 +200,12 @@ public sealed class DemoNetRouteClient : INetRouteClient
     public Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default)
     {
         _pauseDownloads = enabled;
+        return Task.CompletedTask;
+    }
+
+    public Task SetQuietHoursAsync(int? fromHour, int? toHour, CancellationToken ct = default)
+    {
+        _quietHours = fromHour is { } from && toHour is { } to ? $"{from:00}:00 to {to:00}:00" : null;
         return Task.CompletedTask;
     }
 

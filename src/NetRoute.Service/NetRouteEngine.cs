@@ -26,14 +26,14 @@ public sealed class NoDefaultRoutes : IDefaultRouteSource
 
 public interface IPolicyPlanResolver
 {
-    EnforcementPlan Resolve(NetRouteConfig config, bool gamingActive = false, string? gameName = null);
+    EnforcementPlan Resolve(NetRouteConfig config, string? pauseDownloadsBecause = null);
 }
 
 public sealed class PolicyPlanResolver(IAdapterSource adapters) : IPolicyPlanResolver
 {
     private readonly PolicyResolver _resolver = new(adapters);
-    public EnforcementPlan Resolve(NetRouteConfig config, bool gamingActive = false, string? gameName = null)
-        => _resolver.Resolve(config, gamingActive, gameName);
+    public EnforcementPlan Resolve(NetRouteConfig config, string? pauseDownloadsBecause = null)
+        => _resolver.Resolve(config, pauseDownloadsBecause);
 }
 
 /// <summary>Owns service state; one gate makes mutations and reconciliation atomic.</summary>
@@ -50,6 +50,7 @@ public sealed class NetRouteEngine : IDisposable
     private readonly IAppRateSource _rates;
     private readonly SelfTestRunner? _selfTest;
     private readonly IUsageHistory _history;
+    private readonly IUpdateSource _updates;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _systemDownloadsError;
     private readonly List<ServiceEventDto> _events = [];
@@ -73,8 +74,10 @@ public sealed class NetRouteEngine : IDisposable
         ILinkQualitySource? links = null,
         IAppRateSource? rates = null,
         SelfTestRunner? selfTest = null,
-        IUsageHistory? history = null)
+        IUsageHistory? history = null,
+        IUpdateSource? updates = null)
     {
+        _updates = updates ?? new NoUpdates();
         _links = links ?? new NoLinkQuality();
         _rates = rates ?? new NoAppRates();
         _selfTest = selfTest;
@@ -124,13 +127,15 @@ public sealed class NetRouteEngine : IDisposable
                 EnforcementPaused = config.EnforcementPaused,
                 PausedUntil = config.EnforcementPaused ? config.PausedUntil : null,
                 SystemDownloads = DescribeSystemDownloads(config),
-                DownloadsPause = new DownloadsPauseDto(config.PauseDownloadsWhileGaming, _plan?.DownloadsPausedFor),
+                DownloadsPause = new DownloadsPauseDto(config.PauseDownloadsWhileGaming, _plan?.DownloadsPausedFor,
+                    config.DownloadQuietHours?.ToString()),
                 RedirectionAvailable = _backend.RedirectionAvailable,
                 RedirectSummary = _redirectSummary,
                 Roles = BuildRoles(config, adapters),
                 Apps = _plan.Applications.Select(a => BuildApp(a, verifications.GetValueOrDefault(a.Rule.Id))).ToList(),
                 RecentLeaks = verifications.Values.SelectMany(v => v.Leaks).OrderByDescending(l => l.At).ToList(),
                 RecentEvents = _events.ToList(),
+                Update = _updates.Available,
                 RouteTie = tie is null ? null : new RouteTieDto(tie.Adapters.Select(a => a.Name).ToList(),
                     $"{tie.Names} are tied as Windows' default connection, so Windows splits traffic between them " +
                     "and a download can use both at once."),
@@ -316,6 +321,24 @@ public sealed class NetRouteEngine : IDisposable
     public Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default)
         => MutateAsync(config => config with { PauseDownloadsWhileGaming = enabled }, ct);
 
+    public Task SetQuietHoursAsync(int? fromHour, int? toHour, CancellationToken ct = default)
+        => MutateAsync(config => config with
+        {
+            DownloadQuietHours = fromHour is { } from && toHour is { } to
+                ? new QuietHours(Math.Clamp(from, 0, 23), Math.Clamp(to, 0, 23))
+                : null
+        }, ct);
+
+    /// <summary>Why Downloads apps are blocked right now, as a phrase for the user, or null.</summary>
+    private string? WhyDownloadsArePaused(NetRouteConfig config)
+    {
+        if (config.DownloadQuietHours is { } hours && hours.Contains(DateTime.Now))
+        {
+            return $"it is quiet hours ({hours})";
+        }
+        return config.PauseDownloadsWhileGaming && GameInPlay(config) is { } game ? $"{game} is running" : null;
+    }
+
     public SelfTestDto GetSelfTest()
         => _selfTest?.State ?? new SelfTestDto(false, null, [], "This build can't run the test.");
 
@@ -369,8 +392,7 @@ public sealed class NetRouteEngine : IDisposable
 
     private void ReconcileLocked(NetRouteConfig config)
     {
-        var playing = config.PauseDownloadsWhileGaming ? GameInPlay(config) : null;
-        var plan = _resolver.Resolve(config, playing is not null, playing);
+        var plan = _resolver.Resolve(config, WhyDownloadsArePaused(config));
         RecordHealthTransitions(config, plan);
         var fingerprint = Fingerprint(plan);
         if (fingerprint != _fingerprint)
