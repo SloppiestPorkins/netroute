@@ -166,6 +166,27 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             }
         }
 
+        if (status.DownloadsPause is { } pause)
+        {
+            var oneConnection = status.Roles.Where(r => r.Adapter is not null).Select(r => r.Adapter!.Luid).Distinct().Count() == 1;
+            if (!pause.Enabled)
+            {
+                items.Add(HealthItem.Tip("Downloads keep running while you play",
+                    oneConnection
+                        ? "Both roles are the same connection, so traffic can't be separated. Pausing downloads while a game runs is the one thing that will protect it."
+                        : "If a download ever ends up on your gaming line, NetRoute can block the download apps while a game is running.",
+                    "Pause them while I play",
+                    () => main.Run(() => client.SetPauseDownloadsAsync(true), "Downloads will pause while you play.")));
+            }
+            else
+            {
+                items.Add(HealthItem.Fine(
+                    pause.PausedFor is { } game ? $"Downloads are paused while {game} runs" : "Downloads pause while you play",
+                    "They start again by themselves when you stop playing.", "Turn off",
+                    () => main.Run(() => client.SetPauseDownloadsAsync(false), "Downloads keep running while you play.")));
+            }
+        }
+
         await AddGamingLineChecks(status, items);
 
         var ordered = items.OrderBy(i => i.Level).ToList();
@@ -480,3 +501,161 @@ public sealed class GuiState
         }
     }
 }
+
+/// <summary>"Prove it": the self-test, run from the app and shown step by step.</summary>
+public partial class SelfTestViewModel(MainViewModel main) : ObservableObject
+{
+    public ObservableCollection<SelfTestRow> Steps { get; } = [];
+
+    [ObservableProperty] private string _summary = "This checks your connections for real: it asks what the internet sees for each one, and measures your gaming line while the other one downloads.";
+    [ObservableProperty] private bool _running;
+
+    [RelayCommand]
+    private Task Run() => RunAsync();
+
+    public async Task RunAsync()
+    {
+        if (Running)
+        {
+            return;
+        }
+        Running = true;
+        try
+        {
+            var state = await main.Client.StartSelfTestAsync();
+            Show(state);
+            while (state.Running)
+            {
+                await Task.Delay(1000);
+                state = await main.Client.GetSelfTestAsync();
+                Show(state);
+            }
+        }
+        catch (ServiceUnavailableException)
+        {
+            Summary = "The NetRoute service isn't answering, so the test can't run.";
+        }
+        catch (NetRouteServiceException ex)
+        {
+            Summary = ex.Error.FriendlyMessage;
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            Summary = @"The test hit a problem. Details are in %LocalAppData%\NetRoute\gui.log.";
+        }
+        finally
+        {
+            Running = false;
+        }
+    }
+
+    private void Show(SelfTestDto state)
+    {
+        Steps.Clear();
+        foreach (var step in state.Steps)
+        {
+            Steps.Add(new SelfTestRow(step.Title, step.Detail, step.State));
+        }
+        Summary = state.Summary;
+    }
+}
+
+public sealed record SelfTestRow(string Title, string? Detail, SelfTestState State)
+{
+    public string Glyph => State switch
+    {
+        SelfTestState.Pass => "\uE73E",
+        SelfTestState.Warn => "\uE7BA",
+        SelfTestState.Fail => "\uE711",
+        SelfTestState.Running => "\uE895",
+        _ => "\uEA3A"
+    };
+
+    public Brush Brush => Ui.Res(State switch
+    {
+        SelfTestState.Pass => "GoodBrush",
+        SelfTestState.Warn => "WarnBrush",
+        SelfTestState.Fail => "BadBrush",
+        SelfTestState.Running => "DownloadsBrush",
+        _ => "MutedBrush"
+    });
+}
+
+/// <summary>What each app used, per connection, over the last week.</summary>
+public partial class HistoryViewModel(MainViewModel main) : ObservableObject
+{
+    private const double BarWidth = 220;
+    private string? _folder;
+
+    public ObservableCollection<HistoryRow> Days { get; } = [];
+    public ObservableCollection<HistoryRow> Apps { get; } = [];
+
+    [ObservableProperty] private string? _note = "Reading…";
+
+    public async Task LoadAsync(int days = 7)
+    {
+        UsageHistoryDto history;
+        try
+        {
+            history = await main.Client.GetUsageHistoryAsync(days);
+        }
+        catch (Exception ex) when (ex is ServiceUnavailableException or NetRouteServiceException)
+        {
+            Note = "The NetRoute service isn't answering, so there's no history to show.";
+            return;
+        }
+
+        _folder = history.Folder;
+        Days.Clear();
+        Apps.Clear();
+        if (history.Problem is { } problem)
+        {
+            Note = problem;
+            return;
+        }
+
+        var biggestDay = history.Days.Count == 0 ? 1 : history.Days.Max(d => d.DownBytes + d.UpBytes);
+        foreach (var day in history.Days.OrderByDescending(d => d.Day).ThenByDescending(d => d.DownBytes))
+        {
+            Days.Add(Row($"{day.Day}  ·  {day.Adapter}", day.Adapter, day.DownBytes, day.UpBytes, biggestDay));
+        }
+
+        var biggestApp = history.TopApps.Count == 0 ? 1 : history.TopApps.Max(a => a.DownBytes + a.UpBytes);
+        foreach (var app in history.TopApps)
+        {
+            Apps.Add(Row($"{app.App}  ·  {app.Adapter}", app.Adapter, app.DownBytes, app.UpBytes, biggestApp));
+        }
+
+        Note = history.Days.Count == 0
+            ? "Nothing recorded yet. NetRoute writes usage while your apps are actually using the network."
+            : null;
+    }
+
+    private HistoryRow Row(string title, string adapter, double down, double up, double biggest)
+    {
+        var card = main.Roles.FirstOrDefault(r => string.Equals(r.AdapterName, adapter, StringComparison.OrdinalIgnoreCase));
+        return new HistoryRow(title, $"↓ {Format.Bytes(down)}   ↑ {Format.Bytes(up)}",
+            Math.Max(2, (down + up) / Math.Max(1, biggest) * BarWidth),
+            card?.RoleBrush ?? Ui.Res("DefaultBrush"));
+    }
+
+    [RelayCommand]
+    private void OpenFolder()
+    {
+        if (_folder is null || !System.IO.Directory.Exists(_folder))
+        {
+            return;
+        }
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_folder) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+        }
+    }
+}
+
+public sealed record HistoryRow(string Title, string Detail, double BarWidth, Brush Accent);

@@ -153,8 +153,12 @@
                 </ScrollViewer>
                 <TextBlock Grid.Row="3" Text="{Binding Footnote}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,10,0,0"
                            Visibility="{Binding Footnote, Converter={StaticResource NullVisibility}}" />
-                <Button Grid.Row="4" Content="Close" HorizontalAlignment="Right" Margin="0,14,0,0" IsCancel="True"
-                        Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                    <Button Content="History" Margin="0,0,8,0"
+                            Command="{Binding DataContext.OpenHistoryCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                    <Button Content="Close" IsCancel="True"
+                            Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                </StackPanel>
             </Grid>
         </DataTemplate>
 
@@ -169,6 +173,108 @@
                     <Button Content="{Binding ConfirmText}" Style="{StaticResource DangerButton}" Command="{Binding ConfirmCommand}" />
                 </StackPanel>
             </StackPanel>
+        </DataTemplate>
+
+        <!-- Prove it: the self-test -->
+        <DataTemplate DataType="{x:Type local:SelfTestViewModel}">
+            <Grid Width="680" MaxHeight="580">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="Prove it" Style="{StaticResource H2}" />
+                <TextBlock Grid.Row="1" Text="{Binding Summary}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16" />
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Steps}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="14,12" Margin="0,0,0,8">
+                                    <DockPanel>
+                                        <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" Foreground="{Binding Brush}"
+                                                   FontSize="16" VerticalAlignment="Top" Margin="0,2,12,0" />
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                                       Visibility="{Binding Detail, Converter={StaticResource NullVisibility}}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                    <Button Content="Run again" Margin="0,0,8,0" Command="{Binding RunCommand}" />
+                    <Button Content="Close" IsCancel="True"
+                            Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- History -->
+        <DataTemplate DataType="{x:Type local:HistoryViewModel}">
+            <Grid Width="680" MaxHeight="600">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Text="What used each network" Style="{StaticResource H2}" />
+                <TextBlock Grid.Row="1" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16"
+                           Text="The last seven days, from NetRoute's own measurements. One small CSV a day; thirty days are kept." />
+                <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Note}" Style="{StaticResource Caption}" TextWrapping="Wrap"
+                                   Visibility="{Binding Note, Converter={StaticResource NullVisibility}}" />
+                        <TextBlock Text="BY DAY" Style="{StaticResource Section}" Margin="0,0,0,8"
+                                   Visibility="{Binding Days.Count, Converter={StaticResource NullVisibility}}" />
+                        <ItemsControl ItemsSource="{Binding Days}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,7">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="230" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <Border Grid.Column="1" Height="8" CornerRadius="4" Background="{Binding Accent}"
+                                                Width="{Binding BarWidth}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Text="{Binding Detail}" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="TOP APPS" Style="{StaticResource Section}" Margin="0,18,0,8"
+                                   Visibility="{Binding Apps.Count, Converter={StaticResource NullVisibility}}" />
+                        <ItemsControl ItemsSource="{Binding Apps}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,7">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="230" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <Border Grid.Column="1" Height="8" CornerRadius="4" Background="{Binding Accent}"
+                                                Width="{Binding BarWidth}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Text="{Binding Detail}" Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
+                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+                    <Button Content="Open the CSVs" Margin="0,0,8,0" Command="{Binding OpenFolderCommand}" />
+                    <Button Content="Close" IsCancel="True"
+                            Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                </StackPanel>
+            </Grid>
         </DataTemplate>
 
         <!-- Pause: for how long -->
@@ -423,6 +529,12 @@
             <!-- Header -->
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Command="{Binding OpenSelfTestCommand}" Margin="0,0,8,0" ToolTip="Test your connections for real: are they separate, and does a download slow your game?">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE768;" Margin="0,0,8,0" />
+                            <TextBlock Text="Prove it" />
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding OpenCheckupCommand}" Margin="0,0,8,0" ToolTip="Check everything that affects where your traffic goes">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE9D9;" Margin="0,0,8,0" />

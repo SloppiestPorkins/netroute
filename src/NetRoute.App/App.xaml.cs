@@ -19,6 +19,8 @@ public partial class App : Application
     private MainWindow? _window;
     private MainViewModel? _vm;
     private bool _hintShown;
+    private readonly List<(string Title, string Message)> _held = [];
+    private Forms.Timer? _heldTimer;
 
     internal static bool ExitRequested { get; set; }
 
@@ -62,7 +64,7 @@ public partial class App : Application
         if (screenshot is null)
         {
             CreateTray();
-            _vm.Notify += (title, message) => _tray?.ShowBalloonTip(5000, title, message, Forms.ToolTipIcon.Info);
+            _vm.Notify += Notify;
         }
 
         if (!args.Contains("--minimized"))
@@ -146,6 +148,10 @@ public partial class App : Application
         };
         _tray.DoubleClick += (_, _) => ShowWindow();
 
+        // Anything held during a game is said once the game lets go of the screen.
+        _heldTimer = new Forms.Timer { Interval = 5000 };
+        _heldTimer.Tick += (_, _) => ReleaseHeldNotifications();
+
         if (_vm is not null)
         {
             _vm.PropertyChanged += (_, e) =>
@@ -157,6 +163,62 @@ public partial class App : Application
             };
         }
     }
+
+    /// <summary>
+    /// Says something, unless the user is mid-game. A balloon during a full-screen game steals
+    /// focus and can minimise it, which is the loudest complaint about every app of this kind, so
+    /// anything that arrives then is held and said afterwards.
+    /// </summary>
+    private void Notify(string title, string message)
+    {
+        if (AcceptsNotifications())
+        {
+            _tray?.ShowBalloonTip(5000, title, message, Forms.ToolTipIcon.Info);
+            return;
+        }
+        _held.Add((title, message));
+        if (_held.Count > 5)
+        {
+            _held.RemoveAt(0);
+        }
+        _heldTimer?.Start();
+    }
+
+    /// <summary>False during a full-screen game, a presentation, or while Focus assist is on.</summary>
+    private static bool AcceptsNotifications()
+    {
+        try
+        {
+            return SHQueryUserNotificationState(out var state) != 0 || state == QunsAcceptsNotifications;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    private void ReleaseHeldNotifications()
+    {
+        if (_held.Count == 0 || !AcceptsNotifications())
+        {
+            return;
+        }
+        _heldTimer?.Stop();
+        var held = _held.ToList();
+        _held.Clear();
+        if (held.Count == 1)
+        {
+            _tray?.ShowBalloonTip(5000, held[0].Title, held[0].Message, Forms.ToolTipIcon.Info);
+            return;
+        }
+        _tray?.ShowBalloonTip(6000, $"{held.Count} things happened while you were playing",
+            string.Join("  ·  ", held.Select(h => h.Title)), Forms.ToolTipIcon.Info);
+    }
+
+    private const int QunsAcceptsNotifications = 5;
+
+    [System.Runtime.InteropServices.DllImport("shell32.dll")]
+    private static extern int SHQueryUserNotificationState(out int state);
 
     /// <summary>Greys the icon and adds pause bars while paused, so a forgotten pause is visible at a glance.</summary>
     private void UpdateTrayIcon()

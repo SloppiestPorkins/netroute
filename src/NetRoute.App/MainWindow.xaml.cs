@@ -85,6 +85,12 @@ public partial class MainWindow : Window
             case "checkup":
                 await _vm.OpenCheckupAsync();
                 break;
+            case "selftest":
+                await _vm.OpenSelfTestAsync();
+                break;
+            case "history":
+                await _vm.OpenHistoryAsync();
+                break;
             case "pause":
                 _vm.TogglePauseAllCommand.Execute(null);
                 break;

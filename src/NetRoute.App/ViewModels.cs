@@ -421,6 +421,26 @@ public partial class MainViewModel : ObservableObject
         await vm.LoadAsync();
     }
 
+    [RelayCommand]
+    private Task OpenSelfTest() => OpenSelfTestAsync();
+
+    public async Task OpenSelfTestAsync()
+    {
+        var vm = new SelfTestViewModel(this);
+        Overlay = vm;
+        await vm.RunAsync();
+    }
+
+    [RelayCommand]
+    private Task OpenHistory() => OpenHistoryAsync();
+
+    public async Task OpenHistoryAsync()
+    {
+        var vm = new HistoryViewModel(this);
+        Overlay = vm;
+        await vm.LoadAsync();
+    }
+
     /// <summary>Offers the installed download apps; closes itself when there's nothing to offer.</summary>
     public async Task OpenSuggestDownloadsAsync()
     {
