@@ -118,9 +118,9 @@ public sealed class NetRouteEngine : IDisposable
         try
         {
             var config = _store.Load();
-            _plan ??= _resolver.Resolve(config);
+            var plan = _plan ??= _resolver.Resolve(config);
             var adapters = _adapters.DiscoverAll();
-            var verifications = _verifier.Verify(_plan, _policyAppliedAt).ToDictionary(v => v.RuleId);
+            var verifications = _verifier.Verify(plan, _policyAppliedAt).ToDictionary(v => v.RuleId);
             var tie = FindTie(adapters);
             return new ServiceStatusDto
             {
@@ -130,12 +130,12 @@ public sealed class NetRouteEngine : IDisposable
                 EnforcementPaused = config.EnforcementPaused,
                 PausedUntil = config.EnforcementPaused ? config.PausedUntil : null,
                 SystemDownloads = DescribeSystemDownloads(config),
-                DownloadsPause = new DownloadsPauseDto(config.PauseDownloadsWhileGaming, _plan?.DownloadsPausedFor,
+                DownloadsPause = new DownloadsPauseDto(config.PauseDownloadsWhileGaming, plan.DownloadsPausedFor,
                     config.DownloadQuietHours?.ToString()),
                 RedirectionAvailable = _backend.RedirectionAvailable,
                 RedirectSummary = _redirectSummary,
                 Roles = BuildRoles(config, adapters),
-                Apps = _plan.Applications.Select(a => BuildApp(a, verifications.GetValueOrDefault(a.Rule.Id))).ToList(),
+                Apps = plan.Applications.Select(a => BuildApp(a, verifications.GetValueOrDefault(a.Rule.Id))).ToList(),
                 RecentLeaks = verifications.Values.SelectMany(v => v.Leaks).OrderByDescending(l => l.At).ToList(),
                 RecentEvents = _events.ToList(),
                 Update = _updates.Available,
