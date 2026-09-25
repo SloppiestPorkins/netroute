@@ -25,6 +25,12 @@ public static class AppMatching
         {
             return false;
         }
+        if (app.Kind == AppIdentityKind.Folder)
+        {
+            // The user pointed at this folder deliberately, so a games library inside it is included.
+            return app.InstallLocation is { Length: > 0 } folder
+                   && executablePath.StartsWith(folder.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
+        }
         return string.Equals(app.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase)
                || (app.InstallLocation is { Length: > 0 } root && IsOwnFile(root, executablePath));
     }

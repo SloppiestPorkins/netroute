@@ -21,20 +21,14 @@ public static class TrafficVerdicts
     /// <summary>Whether a connection belongs to the app a rule describes, including other program files in a game's own folder.</summary>
     public static bool Covers(AppIdentity app, ObservedConnection c)
     {
-        if (app.Kind == AppIdentityKind.Packaged)
-        {
-            return c.PackageFamilyName is not null
-                   && string.Equals(c.PackageFamilyName, app.PackageFamilyName, StringComparison.OrdinalIgnoreCase);
-        }
-        if (c.ExecutablePath is null)
-        {
-            return false;
-        }
-        if (string.Equals(c.ExecutablePath, app.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+        if (AppMatching.Covers(app, c.ExecutablePath, c.PackageFamilyName))
         {
             return true;
         }
-        return SplitImagePaths.GameRoot(app) is { } root && SplitImagePaths.IsOwnFile(root, c.ExecutablePath);
+        // Store layouts also let an app's own folder be inferred from the path (steamapps, XboxGames).
+        return c.ExecutablePath is { } path
+               && SplitImagePaths.GameRoot(app) is { } root
+               && SplitImagePaths.IsOwnFile(root, path);
     }
 
     public static AppVerification For(AppEnforcement app, IReadOnlyList<ObservedConnection> connections, DateTimeOffset policyAppliedAt)

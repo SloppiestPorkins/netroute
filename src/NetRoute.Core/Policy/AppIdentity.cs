@@ -9,7 +9,13 @@ public enum AppIdentityKind
     /// Packaged application (Store, Game Pass). Identified by package family name,
     /// and by AUMID when a specific application within the package is meant.
     /// </summary>
-    Packaged
+    Packaged,
+
+    /// <summary>
+    /// A folder: every program inside it, whatever each one is called. For a games library,
+    /// where naming every game as it is installed would never end.
+    /// </summary>
+    Folder
 }
 
 /// <summary>
@@ -54,6 +60,7 @@ public sealed record AppIdentity
     public string StableKey => Kind switch
     {
         AppIdentityKind.Packaged => $"pkg:{Aumid ?? PackageFamilyName ?? DisplayName}".ToLowerInvariant(),
+        AppIdentityKind.Folder => $"dir:{(InstallLocation ?? DisplayName).TrimEnd('\\')}".ToLowerInvariant(),
         _ => $"exe:{ExecutablePath ?? DisplayName}".ToLowerInvariant()
     };
 
@@ -62,6 +69,14 @@ public sealed record AppIdentity
         Kind = AppIdentityKind.Win32,
         DisplayName = displayName ?? Path.GetFileNameWithoutExtension(path),
         ExecutablePath = path
+    };
+
+    /// <summary>Every program in a folder, for example a whole Steam library.</summary>
+    public static AppIdentity ForFolder(string path, string? displayName = null) => new()
+    {
+        Kind = AppIdentityKind.Folder,
+        DisplayName = displayName ?? new DirectoryInfo(path.TrimEnd('\\')).Name,
+        InstallLocation = path.TrimEnd('\\')
     };
 
     public static AppIdentity ForPackage(string familyName, string displayName, string? aumid = null) => new()

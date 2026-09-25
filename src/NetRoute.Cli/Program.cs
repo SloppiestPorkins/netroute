@@ -281,6 +281,12 @@ static RoleId? ParseRole(string text)
 /// </summary>
 static async Task<AppIdentity?> ResolveAppAsync(string target)
 {
+    // A folder means every program inside it, which is how you route a whole games library.
+    if (Directory.Exists(target))
+    {
+        return AppIdentity.ForFolder(Path.GetFullPath(target));
+    }
+
     if (target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(target))
     {
         var full = Path.GetFullPath(target);

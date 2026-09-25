@@ -328,6 +328,15 @@ public sealed class WfpEnforcer
                 ? [scope.PackageId(pfn)]
                 : throw new WfpException($"Packaged app '{app.DisplayName}' has no package family name", WfpException.FWP_E_INVALID_PARAMETER);
         }
+        if (app.Kind == AppIdentityKind.Folder)
+        {
+            var programs = SplitImagePaths.For(app);
+            if (programs.Count == 0)
+            {
+                throw new WfpException($"No programs found in '{app.DisplayName}'", WfpException.FWP_E_INVALID_PARAMETER);
+            }
+            return programs.Select(scope.AppId).ToList();
+        }
         if (app.ExecutablePath is not { } main)
         {
             throw new WfpException($"App '{app.DisplayName}' has no executable path", WfpException.FWP_E_INVALID_PARAMETER);

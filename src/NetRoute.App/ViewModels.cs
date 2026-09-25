@@ -852,6 +852,24 @@ public partial class AddAppViewModel(MainViewModel main) : ObservableObject
         Next();
     }
 
+    /// <summary>A whole folder, for a games library where naming each game would never end.</summary>
+    [RelayCommand]
+    private void BrowseFolder()
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Choose a folder. Every program inside it follows the same rule." };
+        if (dialog.ShowDialog() != true)
+        {
+            return;
+        }
+        Selected = new AppChoice(new InstalledApp
+        {
+            Identity = AppIdentity.ForFolder(dialog.FolderName),
+            Category = AppCategory.Other,
+            InstallLocation = dialog.FolderName
+        });
+        Next();
+    }
+
     private bool CanNext() => Selected is not null;
 
     [RelayCommand(CanExecute = nameof(CanNext))]
@@ -888,7 +906,8 @@ public sealed record AppChoice(InstalledApp App)
 {
     public string Name => App.DisplayName;
     public bool Running => App.IsRunning;
-    public string Secondary => App.IsGamePass ? "Game Pass"
+    public string Secondary => App.Identity.Kind == AppIdentityKind.Folder ? $"Every program in {App.Identity.InstallLocation}"
+        : App.IsGamePass ? "Game Pass"
         : App.Identity.Kind == AppIdentityKind.Packaged ? "Microsoft Store"
         : App.Identity.Publisher ?? App.Category switch
         {

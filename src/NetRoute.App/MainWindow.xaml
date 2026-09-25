@@ -422,7 +422,10 @@
                         <TextBlock Text="{Binding Empty}" Style="{StaticResource Caption}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" />
                     </Grid>
                     <DockPanel Grid.Row="4" Margin="0,14,0,0">
-                        <Button Content="Browse for a program…" Style="{StaticResource LinkButton}" Command="{Binding BrowseCommand}" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Browse for a program…" Style="{StaticResource LinkButton}" Command="{Binding BrowseCommand}" />
+                            <Button Content="or a whole folder…" Style="{StaticResource LinkButton}" Margin="10,0,0,0" Command="{Binding BrowseFolderCommand}" />
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                             <Button Content="Cancel" Margin="0,0,8,0" IsCancel="True"
                                     Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />

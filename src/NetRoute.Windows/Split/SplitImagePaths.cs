@@ -24,6 +24,9 @@ public static partial class SplitImagePaths
     private const int MaxDepth = 4;
     private const int MaxImages = 64;
 
+    /// <summary>A games library holds far more programs than one app, so a folder rule gets more room.</summary>
+    private const int MaxFolderImages = 128;
+
     private static readonly string[] StoreMarkers = [@"\steamapps\common\", @"\XboxGames\", @"\Epic Games\"];
 
     /// <summary>
@@ -50,6 +53,8 @@ public static partial class SplitImagePaths
 
     public static IReadOnlyList<string> For(AppIdentity app)
     {
+        var folderRule = app.Kind == AppIdentityKind.Folder;
+        var limit = folderRule ? MaxFolderImages : MaxImages;
         var images = new List<string>();
         if (app.ExecutablePath is { } exe && File.Exists(exe))
         {
@@ -57,9 +62,9 @@ public static partial class SplitImagePaths
         }
         if (GameRoot(app) is { } root)
         {
-            images.AddRange(Executables(root));
+            images.AddRange(Executables(root, limit, includeLibraries: folderRule));
         }
-        return images.Distinct(StringComparer.OrdinalIgnoreCase).Take(MaxImages).ToList();
+        return images.Distinct(StringComparer.OrdinalIgnoreCase).Take(limit).ToList();
     }
 
     internal static string? GameRoot(AppIdentity app)
@@ -133,23 +138,24 @@ public static partial class SplitImagePaths
         return Directory.Exists(full);
     }
 
-    private static IEnumerable<string> Executables(string root)
+    private static IEnumerable<string> Executables(string root, int limit = MaxImages, bool includeLibraries = false)
     {
         var found = new List<string>();
         var pending = new Queue<(string Dir, int Depth)>();
         pending.Enqueue((root, 0));
 
-        while (pending.Count > 0 && found.Count < MaxImages)
+        while (pending.Count > 0 && found.Count < limit)
         {
             var (dir, depth) = pending.Dequeue();
             try
             {
-                found.AddRange(Directory.EnumerateFiles(dir, "*.exe").Take(MaxImages - found.Count));
+                found.AddRange(Directory.EnumerateFiles(dir, "*.exe").Take(limit - found.Count));
                 if (depth < MaxDepth)
                 {
                     foreach (var sub in Directory.EnumerateDirectories(dir))
                     {
-                        if (depth == 0 && AppMatching.LibraryFolders.Contains(Path.GetFileName(sub), StringComparer.OrdinalIgnoreCase))
+                        if (!includeLibraries && depth == 0
+                            && AppMatching.LibraryFolders.Contains(Path.GetFileName(sub), StringComparer.OrdinalIgnoreCase))
                         {
                             continue;   // see AppMatching.LibraryFolders
                         }
