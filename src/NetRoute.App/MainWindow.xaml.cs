@@ -101,6 +101,9 @@ public partial class MainWindow : Window
             case "suggest":
                 await _vm.OpenSuggestDownloadsAsync();
                 break;
+            case "updates":
+                await _vm.ShowUpdatesCommand.ExecuteAsync(null);
+                break;
         }
 
         await Task.Delay(600);

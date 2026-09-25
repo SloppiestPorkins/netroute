@@ -326,6 +326,38 @@ Installs app, service, required networking component, startup, shortcuts; uninst
 cleanly, removing only NetRoute's networking state. Never modify unrelated firewall/WFP
 rules.
 
+## §44a Updating (added after the installer)
+Setup recognises what is already on the PC and offers what fits: **Update** to a newer
+build, **Repair** the same one, **Go back** when the installer is older than what is
+installed, or **Remove**. An update keeps the app list and settings, backs the old
+version up, and rolls it back if anything fails. `/update`, `/repair`, `/remove` and
+`/quiet` pick an action without asking.
+
+In-app updating is opt-in and points wherever the user says. The feed is one JSON
+document over https:
+
+```json
+{ "version": "1.2.0",
+  "url": "https://example.com/NetRoute-Setup-1.2.0.exe",
+  "sha256": "5E88...", "size": 76128256, "notes": "One line for the banner." }
+```
+
+`scripts\build-installer.ps1` writes this file, filled in, to `dist\updates.json`.
+
+Rules, in order of importance:
+- The **service never installs anything**. It checks, downloads and verifies; the app or
+  the CLI runs setup, and Windows asks for administrator. A LocalSystem service that can
+  replace its own program on the strength of a web address is a worse thing to own than a
+  manual update.
+- **No sha256, no download.** NetRoute's installer is not code-signed, so the digest in
+  the feed is the only thing tying the bytes to the version the user chose to trust. A
+  file that hashes differently is deleted, not kept. Without a digest the user gets a
+  link.
+- Downloads land in `%ProgramData%\NetRoute\updates`, writable only by SYSTEM and
+  administrators, and are hashed again immediately before being run elevated.
+- Nothing is configured out of the box: with no feed address, NetRoute never calls
+  anywhere.
+
 ## §45 Security
 Never disable Defender or the Windows Firewall, disable anti-cheat, modify game files,
 inject DLLs, bypass Windows protections, or take ownership of WindowsApps.

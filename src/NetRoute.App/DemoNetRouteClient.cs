@@ -28,6 +28,8 @@ public sealed class DemoNetRouteClient : INetRouteClient
     private bool _systemDownloads = true;
     private bool _pauseDownloads;
     private string? _quietHours;
+    private string? _feedUrl = "https://example.invalid/netroute/updates.json";
+    private bool _automaticUpdates = true;
     private SelfTestDto _selfTest = new(false, null, [], "Not run yet.");
 
     public DemoNetRouteClient(bool firstRun)
@@ -125,6 +127,7 @@ public sealed class DemoNetRouteClient : INetRouteClient
             Apps = apps,
             RecentLeaks = [],
             RecentEvents = _events,
+            Update = _update,
             RouteTie = _tied
                 ? new RouteTieDto(["Ethernet", "Wi-Fi 2"], "Ethernet and Wi-Fi 2 are tied as Windows' default connection, so Windows splits traffic between them and a download can use both at once.")
                 : null,
@@ -256,6 +259,36 @@ public sealed class DemoNetRouteClient : INetRouteClient
             new ConnectionHistoryDto("Discord", "gateway-us-east1-b.discord.gg", "35.227.51.4", "Ethernet", TransportProtocol.Tcp, now.AddHours(-5), now.AddMinutes(-1), 17),
             new ConnectionHistoryDto("steamwebhelper", "your network", "192.168.0.81", "Ethernet", TransportProtocol.Tcp, now.AddHours(-9), now.AddHours(-9), 1)
         ]);
+    }
+
+    private UpdateDto? _update = new("1.2.0", "https://example.invalid/NetRoute-Setup-1.2.0.exe",
+        "Per-app speeds on the Live view, and quiet hours that follow your calendar.")
+    {
+        Sha256 = new string('a', 64), SizeBytes = 74L * 1024 * 1024
+    };
+
+    public Task<UpdateDto?> CheckForUpdateAsync(CancellationToken ct = default) => Task.FromResult(_update);
+
+    public Task<UpdateDto?> DownloadUpdateAsync(CancellationToken ct = default)
+    {
+        // The demo skips straight to the end: there is nothing to fetch and nothing to verify.
+        _update = _update is null ? null : _update with
+        {
+            State = UpdateState.Ready,
+            Fraction = 1,
+            ReadyPath = @"C:\ProgramData\NetRoute\updates\NetRoute-Setup-1.2.0.exe"
+        };
+        return Task.FromResult(_update);
+    }
+
+    public Task<UpdateSettingsDto> GetUpdateSettingsAsync(CancellationToken ct = default)
+        => Task.FromResult(new UpdateSettingsDto("1.1.0", _feedUrl, _automaticUpdates, DateTimeOffset.Now.AddHours(-3), _update));
+
+    public Task SetUpdateSettingsAsync(string? feedUrl, bool automatic, CancellationToken ct = default)
+    {
+        _feedUrl = string.IsNullOrWhiteSpace(feedUrl) ? null : feedUrl.Trim();
+        _automaticUpdates = automatic;
+        return Task.CompletedTask;
     }
 
     public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default)

@@ -1,7 +1,7 @@
 <Project>
   <!-- One version for every NetRoute binary and the installer. Bump it here for a release. -->
   <PropertyGroup>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>NetRoute</Product>
     <Company>NetRoute</Company>
   </PropertyGroup>

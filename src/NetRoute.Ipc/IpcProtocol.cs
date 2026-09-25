@@ -51,6 +51,10 @@ public static class IpcCommands
     public const string GetSelfTest = "getSelfTest";
     public const string GetUsageHistory = "getUsageHistory";
     public const string GetConnectionHistory = "getConnectionHistory";
+    public const string CheckForUpdate = "checkForUpdate";
+    public const string DownloadUpdate = "downloadUpdate";
+    public const string GetUpdateSettings = "getUpdateSettings";
+    public const string SetUpdateSettings = "setUpdateSettings";
 }
 
 public sealed record IpcRequest

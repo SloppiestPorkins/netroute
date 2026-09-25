@@ -404,6 +404,58 @@
         </DataTemplate>
 
         <!-- Add App -->
+        <!-- Updates -->
+        <DataTemplate DataType="{x:Type local:UpdatesViewModel}">
+            <Grid Width="620">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock Text="Updates" Style="{StaticResource H2}" />
+                    <TextBlock Text="{Binding CurrentVersion}" Style="{StaticResource Caption}" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding CheckedAtText}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Margin="0,18,0,0">
+                    <TextBlock Text="Where to look" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,8"
+                               Text="An https address answering with the version, the download link and its sha256. Leave it empty and NetRoute never calls anywhere." />
+                    <TextBox Text="{Binding FeedUrl, UpdateSourceTrigger=PropertyChanged}" Tag="https://example.com/netroute/updates.json" />
+                    <CheckBox IsChecked="{Binding Automatic}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Look once a day and fetch what you find" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                       Text="The download is checked against its sha256 and kept until you install it. Nothing is installed without you clicking." />
+                        </StackPanel>
+                    </CheckBox>
+                </StackPanel>
+
+                <Border Grid.Row="2" Background="{StaticResource SurfaceAltBrush}" CornerRadius="10" Padding="14,12" Margin="0,18,0,0"
+                        Visibility="{Binding Found, Converter={StaticResource NullVisibility}}">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Found}" TextWrapping="Wrap" />
+                        <ProgressBar Value="{Binding Fraction, Mode=OneWay}" Maximum="1" Height="4" Margin="0,10,0,0"
+                                     Visibility="{Binding ShowProgress, Converter={StaticResource BoolVisibility}}" />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Grid.Row="2" Text="{Binding Problem}" Foreground="{StaticResource WarnBrush}" TextWrapping="Wrap"
+                           VerticalAlignment="Bottom" Margin="0,18,0,0"
+                           Visibility="{Binding Problem, Converter={StaticResource NullVisibility}}" />
+
+                <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                    <Button Content="Save" Margin="0,0,8,0" Command="{Binding SaveCommand}" />
+                    <Button Style="{StaticResource PrimaryButton}" Content="{Binding ActionText}" Margin="0,0,8,0" Command="{Binding ActCommand}" />
+                    <Button Content="Close" IsCancel="True"
+                            Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
         <DataTemplate DataType="{x:Type local:AddAppViewModel}">
             <Grid Width="620" Height="520">
                 <!-- Step 1: pick an app -->
@@ -625,16 +677,21 @@
                     </DockPanel>
                 </Border>
 
-                <!-- A newer version is out -->
+                <!-- A newer version is out: fetch it, then run it -->
                 <Border Background="{StaticResource DownloadsTintBrush}" CornerRadius="10" Padding="14,10" Margin="0,16,0,0"
                         Visibility="{Binding UpdateText, Converter={StaticResource NullVisibility}}">
-                    <DockPanel>
-                        <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="Get it" VerticalAlignment="Center"
-                                Margin="14,0,0,0" Command="{Binding GetUpdateCommand}" />
-                        <TextBlock Style="{StaticResource Icon}" Text="&#xE896;" Foreground="{StaticResource DownloadsBrush}"
-                                   VerticalAlignment="Center" Margin="0,0,10,0" />
-                        <TextBlock Text="{Binding UpdateText}" TextWrapping="Wrap" VerticalAlignment="Center" />
-                    </DockPanel>
+                    <StackPanel>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="{Binding UpdateAction}"
+                                    VerticalAlignment="Center" Margin="14,0,0,0" Command="{Binding GetUpdateCommand}"
+                                    IsEnabled="{Binding UpdateActionEnabled}" />
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE896;" Foreground="{StaticResource DownloadsBrush}"
+                                       VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <TextBlock Text="{Binding UpdateText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <ProgressBar Value="{Binding UpdateFraction, Mode=OneWay}" Maximum="1" Height="4" Margin="0,10,0,0"
+                                     Visibility="{Binding UpdateBusy, Converter={StaticResource BoolVisibility}}" />
+                    </StackPanel>
                 </Border>
 
                 <!-- Two connections tied for Windows' default route: one-click fix -->

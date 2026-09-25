@@ -36,9 +36,9 @@ builder.ConfigureServices(services =>
     services.AddSingleton<ConnectionHistory>();
     services.AddSingleton<IConnectionHistory>(sp => sp.GetRequiredService<ConnectionHistory>());
     services.AddHostedService(sp => sp.GetRequiredService<ConnectionHistory>());
-    services.AddSingleton<UpdateChecker>();
-    services.AddSingleton<IUpdateSource>(sp => sp.GetRequiredService<UpdateChecker>());
-    services.AddHostedService(sp => sp.GetRequiredService<UpdateChecker>());
+    services.AddSingleton<Updater>();
+    services.AddSingleton<IUpdateSource>(sp => sp.GetRequiredService<Updater>());
+    services.AddHostedService(sp => sp.GetRequiredService<Updater>());
     services.AddSingleton<NetRouteEngine>();
     services.AddSingleton<NamedPipeServer>();
     services.AddHostedService<ServiceWorker>();

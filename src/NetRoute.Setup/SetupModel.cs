@@ -9,14 +9,43 @@ using System.Windows;
 
 namespace NetRoute.Setup;
 
+/// <summary>One of the things setup can do about what is already here, as offered on the first page.</summary>
+public sealed class ActionChoice : Observable
+{
+    private readonly Action<SetupAction> _choose;
+    private bool _isSelected;
+
+    internal ActionChoice(SetupAction action, string title, string detail, Action<SetupAction> choose)
+    {
+        Action = action;
+        Title = title;
+        Detail = detail;
+        _choose = choose;
+    }
+
+    internal SetupAction Action { get; }
+    public string Title { get; }
+    public string Detail { get; }
+
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set
+        {
+            if (Set(ref _isSelected, value) && value)
+            {
+                _choose(Action);
+            }
+        }
+    }
+}
+
 /// <summary>The setup window's state: which page is showing, the options, and the progress list.</summary>
 public sealed class SetupModel : Observable
 {
-    private readonly bool _uninstall;
-    private readonly string _existingVersion;
-    private readonly bool _hasFiles;
-    private readonly string _verb;
+    private readonly Existing _existing;
     private SetupEngine _engine;
+    private SetupAction _action;
 
     private string _page = "Welcome";
     private string _heading;
@@ -36,27 +65,41 @@ public sealed class SetupModel : Observable
     private bool _failed;
     private double _progress;
 
-    public SetupModel(bool uninstall)
+    public SetupModel(SetupAction action)
     {
-        _uninstall = uninstall;
-        _existingVersion = Machine.InstalledVersion();
-        _hasFiles = File.Exists(Machine.ServiceExe);
-        _verb = uninstall ? "Remove"
-            : _existingVersion == null ? (_hasFiles ? "Update" : "Install")
-            : _existingVersion == Machine.Version ? "Repair" : "Update";
+        _existing = Existing.Find();
+        _action = _existing == null
+            ? (action == SetupAction.Remove ? SetupAction.Remove : SetupAction.Install)
+            : action == SetupAction.Install ? _existing.Suggested() : action;
 
-        foreach (var step in uninstall ? SetupEngine.UninstallSteps() : SetupEngine.InstallSteps())
+        if (_existing != null && Payload.Present)
         {
-            Steps.Add(step);
+            // Both ways out of an existing install, on the page rather than buried in Settings > Apps.
+            var replace = _existing.Suggested();
+            Choices.Add(new ActionChoice(replace,
+                replace == SetupAction.Repair ? "Repair version " + Machine.Version : Verb(replace) + " to " + Machine.Version,
+                replace == SetupAction.Update
+                    ? "Your apps and settings are kept. Protection pauses for a few seconds while the files are swapped, then comes back on by itself."
+                    : replace == SetupAction.Repair
+                        ? "Puts every file back, and registers the service and the driver again. Nothing you have set up is touched."
+                        : "Puts the older version back in place of " + _existing.Version
+                          + ". Your apps and settings are kept, but anything only the newer one understood is dropped.",
+                Choose));
+            Choices.Add(new ActionChoice(SetupAction.Remove, "Remove NetRoute",
+                "Stops NetRoute, puts Windows' network settings back the way they were, and removes the program.", Choose));
+            var current = Choices.FirstOrDefault(c => c.Action == _action) ?? Choices[0];
+            _action = current.Action;
+            current.IsSelected = true;
         }
 
+        BuildSteps();
         DriverAlreadyRunning = Machine.Status(Machine.DriverService) == ServiceControllerStatus.Running;
         if (Machine.MullvadDaemons().Any(n => Machine.StartMode(n) != ServiceStartMode.Disabled))
         {
             MullvadNote = "Mullvad VPN is installed. Its background service will be turned off, because only one program " +
                           "can use the driver at a time. Removing NetRoute turns it back on.";
         }
-        StartWithWindows = !_hasFiles || File.Exists(Machine.StartupLink) || File.Exists(Machine.OldStartupLink);
+        StartWithWindows = _existing == null || File.Exists(Machine.StartupLink) || File.Exists(Machine.OldStartupLink);
         DesktopShortcut = File.Exists(Machine.DesktopLink);
 
         PrimaryCommand = new Command(OnPrimary);
@@ -66,13 +109,47 @@ public sealed class SetupModel : Observable
 
     public ObservableCollection<StepItem> Steps { get; } = new ObservableCollection<StepItem>();
     public ObservableCollection<string> Warnings { get; } = new ObservableCollection<string>();
+    public ObservableCollection<ActionChoice> Choices { get; } = new ObservableCollection<ActionChoice>();
     public Command PrimaryCommand { get; }
     public Command SecondaryCommand { get; }
 
-    public bool IsUninstall => _uninstall;
-    public bool IsInstall => !_uninstall;
+    public bool IsUninstall => _action == SetupAction.Remove;
+    public bool IsInstall => !IsUninstall;
+    public bool HasChoices => Choices.Count > 0;
+    public bool IsFirstInstall => _existing == null;
+    public string DriverFootnote => "Installs Mullvad's Microsoft-signed split-tunnel driver (98 KB). No VPN app and no account.";
     public bool DriverAlreadyRunning { get; }
-    public string WindowTitle => _uninstall ? "Remove NetRoute" : "NetRoute Setup";
+    public string WindowTitle => IsUninstall ? "Remove NetRoute" : "NetRoute Setup";
+
+    /// <summary>The older version is about to be put back: worth saying out loud before it happens.</summary>
+    public string DowngradeNote => _action == SetupAction.Downgrade && Page == "Welcome"
+        ? "You have " + _existing.Version + ", which is newer than this installer's " + Machine.Version + "."
+        : null;
+
+    private void Choose(SetupAction action)
+    {
+        if (_action == action)
+        {
+            return;
+        }
+        _action = action;
+        BuildSteps();
+        ShowWelcome();
+        Raise(nameof(IsUninstall));
+        Raise(nameof(IsInstall));
+        Raise(nameof(WindowTitle));
+        Raise(nameof(DowngradeNote));
+        Raise(nameof(PrimaryText));
+    }
+
+    private void BuildSteps()
+    {
+        Steps.Clear();
+        foreach (var step in IsUninstall ? SetupEngine.UninstallSteps() : SetupEngine.InstallSteps())
+        {
+            Steps.Add(step);
+        }
+    }
 
     public string Page
     {
@@ -86,6 +163,7 @@ public sealed class SetupModel : Observable
                 Raise(nameof(SecondaryText));
                 Raise(nameof(ShowSecondary));
                 Raise(nameof(CanLaunch));
+                Raise(nameof(DowngradeNote));
             }
         }
     }
@@ -107,11 +185,11 @@ public sealed class SetupModel : Observable
     public bool Failed { get => _failed; private set => Set(ref _failed, value); }
     public double Progress { get => _progress; set => Set(ref _progress, value); }
 
-    public string PrimaryText => Page == "Welcome" ? _verb : Page == "Failed" ? "Close" : "Finish";
+    public string PrimaryText => Page == "Welcome" ? Verb(_action) : Page == "Failed" ? "Close" : "Finish";
     public bool ShowPrimary => Page != "Progress";
     public string SecondaryText => Page == "Welcome" ? "Cancel" : "Open log";
     public bool ShowSecondary => Page == "Welcome" || Page == "Failed";
-    public bool CanLaunch => !_uninstall && Page == "Done";
+    public bool CanLaunch => !IsUninstall && Page == "Done";
 
     public SetupOptions CurrentOptions() => new SetupOptions
     {
@@ -125,15 +203,19 @@ public sealed class SetupModel : Observable
     public bool Execute(SetupOptions options)
     {
         var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        LogPath = _uninstall
-            ? Path.Combine(Path.GetTempPath(), $"NetRoute-uninstall-{stamp}.log")
-            : Path.Combine(Machine.DataDir, "logs", $"setup-{stamp}.log");
+        LogPath = IsUninstall
+            ? Path.Combine(Path.GetTempPath(), "NetRoute-uninstall-" + stamp + ".log")
+            : Path.Combine(Machine.DataDir, "logs", "setup-" + stamp + ".log");
         var log = new Log(LogPath);
-        log.Write($"NetRoute setup {Machine.Version}: {_verb.ToLowerInvariant()} on {Environment.OSVersion}");
+        log.Write($"NetRoute setup {Machine.Version}: {Verb(_action).ToLowerInvariant()} on {Environment.OSVersion}");
+        if (_existing != null)
+        {
+            log.Write("Already here: " + _existing.Describe());
+        }
         _engine = new SetupEngine(log);
         try
         {
-            if (_uninstall)
+            if (IsUninstall)
             {
                 _engine.Uninstall(options, Steps, p => Progress = p);
             }
@@ -154,19 +236,22 @@ public sealed class SetupModel : Observable
 
     private void ShowWelcome()
     {
-        Heading = _verb + " NetRoute";
-        Subheading = _uninstall
-            ? "Version " + (_existingVersion ?? Machine.Version)
-            : "Version " + Machine.Version + (_existingVersion != null && _existingVersion != Machine.Version ? "  ·  replaces " + _existingVersion
-                : _existingVersion == null && _hasFiles ? "  ·  replaces the build from INSTALL-NETROUTE.cmd" : "");
-        Intro = _uninstall
+        Heading = Verb(_action) + " NetRoute";
+        Subheading = IsUninstall
+            ? "Version " + (_existing != null && _existing.Version != null ? _existing.Version : Machine.Version)
+            : "Version " + Machine.Version
+              + (_existing == null ? ""
+                  : _existing.Version == null ? "  ·  replaces the build from INSTALL-NETROUTE.cmd"
+                  : _existing.Version == Machine.Version ? "  ·  already installed"
+                  : "  ·  replaces " + _existing.Version);
+        Intro = IsUninstall
             ? "This stops NetRoute, puts Windows' network settings back the way they were, and removes the program."
-            : _verb == "Install"
+            : _existing == null
                 ? "Keeps your games on one internet connection and your downloads on the other."
-                : "Your apps and settings are kept. Protection pauses for a few seconds while NetRoute updates.";
-        Footer = _uninstall
+                : _existing.Describe();
+        Footer = IsUninstall
             ? "If NetRoute installed Mullvad's split-tunnel driver, that's removed too. Mullvad VPN itself is left alone."
-            : $"Installs to {Machine.InstallDir}  ·  Includes Mullvad's split-tunnel driver (MPL-2.0)";
+            : "Installs to " + Machine.InstallDir + "  ·  Includes Mullvad's split-tunnel driver (MPL-2.0)";
     }
 
     private async void Start()
@@ -188,10 +273,10 @@ public sealed class SetupModel : Observable
         var restart = _engine?.RestartNeeded == true;
         if (Succeeded)
         {
-            Heading = _uninstall ? "NetRoute is removed" : "NetRoute is " + Past();
-            DoneMessage = _uninstall
+            Heading = IsUninstall ? "NetRoute is removed" : "NetRoute is " + Past();
+            DoneMessage = IsUninstall
                 ? "Normal Windows networking is restored." + (restart ? " Restart your PC to finish removing the split-tunnel driver." : "")
-                : _verb == "Install"
+                : _action == SetupAction.Install
                     ? "Open NetRoute and choose which connection is for games and which is for downloads. It stays in the tray from now on."
                     : "Your apps and settings were kept, and protection is back on." + (restart ? " Restart your PC to finish the update." : "");
             Page = "Done";
@@ -205,9 +290,40 @@ public sealed class SetupModel : Observable
         Footer = LogPath == null ? null : "Log: " + LogPath;
     }
 
-    private string Progressive() => _verb == "Remove" ? "Removing" : _verb == "Repair" ? "Repairing" : _verb == "Update" ? "Updating" : "Installing";
+    private static string Verb(SetupAction action)
+    {
+        switch (action)
+        {
+            case SetupAction.Remove: return "Remove";
+            case SetupAction.Repair: return "Repair";
+            case SetupAction.Update: return "Update";
+            case SetupAction.Downgrade: return "Go back";
+            default: return "Install";
+        }
+    }
 
-    private string Past() => _verb == "Repair" ? "repaired" : _verb == "Update" ? "updated" : "installed";
+    private string Progressive()
+    {
+        switch (_action)
+        {
+            case SetupAction.Remove: return "Removing";
+            case SetupAction.Repair: return "Repairing";
+            case SetupAction.Update: return "Updating";
+            case SetupAction.Downgrade: return "Going back to " + Machine.Version + " of";
+            default: return "Installing";
+        }
+    }
+
+    private string Past()
+    {
+        switch (_action)
+        {
+            case SetupAction.Repair: return "repaired";
+            case SetupAction.Update: return "updated";
+            case SetupAction.Downgrade: return "back on " + Machine.Version;
+            default: return "installed";
+        }
+    }
 
     private void OnPrimary()
     {
@@ -216,7 +332,7 @@ public sealed class SetupModel : Observable
             Start();
             return;
         }
-        if (Succeeded && !_uninstall && LaunchWhenDone)
+        if (Succeeded && !IsUninstall && LaunchWhenDone)
         {
             try
             {
@@ -249,6 +365,19 @@ public sealed class SetupModel : Observable
     {
         switch (page)
         {
+            case "welcome":
+                // What the first page looks like when NetRoute is already on the PC.
+                Choices.Clear();
+                Choices.Add(new ActionChoice(SetupAction.Update, "Update to " + Machine.Version,
+                    "Your apps and settings are kept. Protection pauses for a few seconds while the files are swapped, then comes back on by itself.",
+                    Choose));
+                Choices.Add(new ActionChoice(SetupAction.Remove, "Remove NetRoute",
+                    "Stops NetRoute, puts Windows' network settings back the way they were, and removes the program.", Choose));
+                Choices[0].IsSelected = true;
+                Raise(nameof(HasChoices));
+                Subheading = "Version " + Machine.Version + "  ·  replaces 1.0.0";
+                Intro = "NetRoute 1.0.0 is already installed, from 14 September 2026. It is running now.";
+                break;
             case "progress":
                 Page = "Progress";
                 Heading = Progressive() + " NetRoute…";
@@ -257,7 +386,7 @@ public sealed class SetupModel : Observable
                 {
                     Steps[i].State = i < 3 ? StepState.Done : i == 3 ? StepState.Running : StepState.Pending;
                 }
-                Steps[0].Detail = $"Version {Machine.Version} is ready to install.";
+                Steps[0].Detail = "Version " + Machine.Version + " is ready to install.";
                 Steps[1].Detail = "Stopped the service. Windows' network settings are back to normal until it restarts.";
                 Steps[2].Detail = "Installed to " + Machine.InstallDir + ".";
                 Progress = 0.62;

@@ -45,6 +45,24 @@
             <StackPanel Visibility="{Binding Page, Converter={StaticResource Page}, ConverterParameter=Welcome}">
                 <TextBlock Text="{Binding Intro}" TextWrapping="Wrap" FontSize="15" Foreground="{StaticResource MutedBrush}" LineHeight="22" />
 
+                <!-- NetRoute is already on this PC: update or repair it, or take it off -->
+                <ItemsControl ItemsSource="{Binding Choices}" Margin="0,20,0,0"
+                              Visibility="{Binding HasChoices, Converter={StaticResource Bool}}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <RadioButton GroupName="Action" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="0,0,0,14">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </RadioButton>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <TextBlock Text="{Binding DowngradeNote}" Foreground="{StaticResource WarnBrush}" FontSize="13" TextWrapping="Wrap"
+                           Margin="0,-4,0,0" Visibility="{Binding DowngradeNote, Converter={StaticResource Null}}" />
+
                 <StackPanel Margin="0,26,0,0" Visibility="{Binding IsInstall, Converter={StaticResource Bool}}">
                     <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1"
                             CornerRadius="10" Padding="16,13" Margin="0,0,0,18"

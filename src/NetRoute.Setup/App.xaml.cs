@@ -11,7 +11,8 @@ namespace NetRoute.Setup;
 /// Command line:
 /// <list type="bullet">
 /// <item>(none)                 install, or update/repair when NetRoute is already installed</item>
-/// <item>/uninstall             remove NetRoute (the default when there is no payload)</item>
+/// <item>/uninstall, /remove   remove NetRoute (the default when there is no payload)</item>
+/// <item>/update, /repair      pick what to do about an existing install, instead of being asked</item>
 /// <item>/quiet                 no window; exit code 0 on success, 1 on failure</item>
 /// <item>/extract &lt;dir&gt;       unpack the payload only (no admin needed), for checking a build</item>
 /// <item>/screenshot &lt;png&gt; [/page welcome|progress|done|failed]   render a page and exit (no admin needed)</item>
@@ -52,7 +53,11 @@ public partial class App : Application
             return;
         }
 
-        var uninstall = Has("/uninstall") || !Payload.Present;
+        var uninstall = Has("/uninstall") || Has("/remove") || !Payload.Present;
+        var action = uninstall ? SetupAction.Remove
+            : Has("/repair") ? SetupAction.Repair
+            : Has("/update") ? SetupAction.Update
+            : SetupAction.Install;   // the model turns this into update, repair or go-back when NetRoute is already here
         var screenshot = Value("/screenshot");
         var self = Process.GetCurrentProcess().MainModule.FileName;
 
@@ -73,7 +78,7 @@ public partial class App : Application
             }
         }
 
-        var model = new SetupModel(uninstall);
+        var model = new SetupModel(action);
         void CleanUp()
         {
             if (uninstall && Has("/relocated"))

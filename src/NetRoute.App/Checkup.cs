@@ -213,6 +213,7 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             }
         }
 
+        await AddUpdateChecks(items);
         await AddGamingLineChecks(status, items);
 
         var ordered = items.OrderBy(i => i.Level).ToList();
@@ -239,6 +240,49 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
     /// Anything moving a lot of data on the Gaming connection that isn't a Gaming app. This is
     /// what actually hurts a game (a big download on its line), and it's measured, not guessed.
     /// </summary>
+    /// <summary>
+    /// Updates. Nothing is configured out of the box, so the first thing this can say is that
+    /// NetRoute has nowhere to look — which is a choice the user should get to make, not a
+    /// silence they never notice.
+    /// </summary>
+    private async Task AddUpdateChecks(List<HealthItem> items)
+    {
+        UpdateSettingsDto settings;
+        try
+        {
+            settings = await main.Client.GetUpdateSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            return;
+        }
+
+        Task Open() => main.ShowUpdatesCommand.ExecuteAsync(null);
+
+        if (settings.Available is { } update)
+        {
+            items.Add(HealthItem.Tip($"NetRoute {update.Version} is available", Upgrade.Describe(update), Upgrade.ButtonText(update), Open));
+        }
+        else if (settings.FeedUrl is null)
+        {
+            items.Add(HealthItem.Tip("NetRoute never checks for updates",
+                $"You are on {settings.CurrentVersion}, and NetRoute has nowhere to look, so it doesn't call anywhere. " +
+                "Give it an address and it will check daily, fetch what it finds and prove the download is genuine before you install it.",
+                "Set that up", Open));
+        }
+        else if (!settings.Automatic)
+        {
+            items.Add(HealthItem.Tip("Update checks are switched off",
+                $"You are on {settings.CurrentVersion}. NetRoute only looks when you ask it to.", "Updates", Open));
+        }
+        else
+        {
+            items.Add(HealthItem.Fine($"You are on the newest NetRoute ({settings.CurrentVersion})",
+                settings.CheckedAt is { } at ? "Last looked " + Format.Ago(at) + "." : "It checks once a day.", "Check now", Open));
+        }
+    }
+
     private async Task AddGamingLineChecks(ServiceStatusDto status, List<HealthItem> items)
     {
         var gaming = status.Roles.FirstOrDefault(r => r.Role == RoleId.Gaming)?.Adapter?.Name;

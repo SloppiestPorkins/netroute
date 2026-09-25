@@ -54,6 +54,12 @@ public sealed record NetRouteConfig
     /// </summary>
     public string? UpdateFeedUrl { get; init; }
 
+    /// <summary>
+    /// Check that address daily and fetch what it finds, so the update is ready when the user
+    /// wants it. Installing is still a click: nothing replaces NetRoute while you are playing.
+    /// </summary>
+    public bool AutomaticUpdates { get; init; } = true;
+
     public RoleBinding? BindingFor(RoleId role)
         => RoleBindings.FirstOrDefault(b => b.Role == role);
 }

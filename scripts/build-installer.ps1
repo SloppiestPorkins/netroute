@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Builds dist\NetRoute-Setup-<version>.exe: one installer that needs nothing else on the PC.
 
@@ -116,8 +116,22 @@ try {
 
 Step 'Done'
 $item = Get-Item $setup
+$hash = (Get-FileHash $setup -Algorithm SHA256).Hash
 Write-Host ("  {0}  ({1:N1} MB)" -f $item.FullName, ($item.Length / 1MB)) -ForegroundColor Green
-Write-Host "  SHA-256 $((Get-FileHash $setup -Algorithm SHA256).Hash)"
+Write-Host "  SHA-256 $hash"
+
+# The update document, ready to publish beside the installer. NetRoute refuses to fetch a build
+# whose sha256 it cannot check, so this file is what makes in-app updating work at all: point
+# 'netroute update --feed' at wherever this ends up.
+$feed = Join-Path $dist 'updates.json'
+[ordered]@{
+    version = $version
+    url     = "https://example.invalid/netroute/$($item.Name)"
+    sha256  = $hash
+    size    = $item.Length
+    notes   = 'Edit this line: it is what the app shows beside the version.'
+} | ConvertTo-Json | ForEach-Object { [IO.File]::WriteAllText($feed, $_, (New-Object Text.UTF8Encoding $false)) }
+Write-Host "  Update document $feed (set its url before publishing)"
 if (-not $sign) {
     Write-Host '  Unsigned: SmartScreen will warn on other PCs. See the notes at the top of build-installer.ps1.' -ForegroundColor Yellow
 }

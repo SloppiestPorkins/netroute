@@ -19,6 +19,7 @@ const string Usage = """
           quiet-hours <from> <to>|off    hold downloads between these hours, e.g. quiet-hours 18 23
           selftest                       prove the separation works, end to end
           history [days]                 how much each app used, per connection
+          update [--feed <url>|--off]    check for a newer NetRoute, fetch it, and install it
           emergency-disable              remove every NetRoute rule from Windows right now
           fix-routes                     give Windows one default connection when two are tied
         """;
@@ -83,6 +84,7 @@ static async Task<int> RunAsync(string[] args)
                 Console.WriteLine($"Downloads are held back between {from:00}:00 and {to:00}:00.");
                 break;
             case "selftest": return await SelfTestAsync(client);
+            case "update": return await UpdateAsync(client, args);
             case "history": return await HistoryAsync(client, args.Length > 1 && int.TryParse(args[1], out var requested) ? requested : 7);
             case "cleanup-driver": return LocalCleanup(removeSublayers: args.Contains("--remove-sublayers"));
             case "fix-routes":
@@ -100,6 +102,95 @@ static async Task<int> RunAsync(string[] args)
     catch (ServiceUnavailableException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     catch (NetRouteServiceException ex) { Console.Error.WriteLine(ex.Error.FriendlyMessage); return 1; }
     catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
+}
+
+/// <summary>
+/// Updates: where to look, what is there, and installing it.
+///
+/// <para>Installing runs setup, which asks for administrator itself. The service will not do it:
+/// it runs as LocalSystem, and a service that can replace its own program on the strength of a
+/// web address is a worse thing to have on a PC than a manual update.</para>
+/// </summary>
+static async Task<int> UpdateAsync(INetRouteClient client, string[] args)
+{
+    var feed = Array.FindIndex(args, a => a is "--feed" or "-f");
+    if (feed >= 0 && feed + 1 < args.Length)
+    {
+        await client.SetUpdateSettingsAsync(args[feed + 1], automatic: !args.Contains("--manual"));
+        Console.WriteLine($"NetRoute will look at {args[feed + 1]}"
+                          + (args.Contains("--manual") ? " when you run 'netroute update'." : " once a day."));
+    }
+    else if (args.Contains("--off"))
+    {
+        var was = await client.GetUpdateSettingsAsync();
+        await client.SetUpdateSettingsAsync(was.FeedUrl, automatic: false);
+        Console.WriteLine("NetRoute won't look for updates by itself. 'netroute update' still checks.");
+        return 0;
+    }
+
+    var settings = await client.GetUpdateSettingsAsync();
+    Console.WriteLine($"You have NetRoute {settings.CurrentVersion}.");
+    if (settings.FeedUrl is null)
+    {
+        Console.WriteLine("Nowhere to look, so NetRoute never calls anywhere.");
+        Console.WriteLine("Set one with: netroute update --feed https://example.com/netroute/updates.json");
+        return 0;
+    }
+
+    var found = await client.CheckForUpdateAsync();
+    if (found is null)
+    {
+        Console.WriteLine("You are on the newest version.");
+        return 0;
+    }
+    if (found.State == UpdateState.Failed)
+    {
+        Console.Error.WriteLine(found.Problem);
+        return 1;
+    }
+    Console.WriteLine($"NetRoute {found.Version} is available." + (found.Notes is { Length: > 0 } notes ? " " + notes : ""));
+
+    if (found.State != UpdateState.Ready)
+    {
+        if (found.Sha256 is not { Length: 64 })
+        {
+            Console.WriteLine("It publishes no sha256, so NetRoute won't fetch it for you: " + found.Url);
+            return 0;
+        }
+        found = await client.DownloadUpdateAsync();
+        while (found is { State: UpdateState.Downloading })
+        {
+            Console.Write((char)13 + "Fetching... " + found.Fraction.ToString("P0").PadRight(8));
+            await Task.Delay(500);
+            found = (await client.GetUpdateSettingsAsync()).Available;
+        }
+        Console.WriteLine();
+    }
+
+    if (found is not { State: UpdateState.Ready, ReadyPath: { Length: > 0 } path })
+    {
+        Console.Error.WriteLine(found?.Problem ?? "The update didn't finish downloading.");
+        return 1;
+    }
+
+    Console.WriteLine($"Ready: {path}");
+    if (!args.Contains("--install"))
+    {
+        Console.WriteLine("Run 'netroute update --install' to install it. It takes under a minute and keeps your settings.");
+        return 0;
+    }
+    try
+    {
+        using var setup = System.Diagnostics.Process.Start(
+            new System.Diagnostics.ProcessStartInfo(path, "/update") { UseShellExecute = true, Verb = "runas" });
+        Console.WriteLine("Setup is running. NetRoute stops for a few seconds while the files are swapped.");
+        return 0;
+    }
+    catch (Win32Exception)
+    {
+        Console.Error.WriteLine("Installing needs administrator permission, which wasn't given.");
+        return 1;
+    }
 }
 
 /// <summary>Runs the service's self-test, printing each step as it lands.</summary>

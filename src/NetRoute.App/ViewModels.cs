@@ -62,6 +62,14 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string? _banner;
     [ObservableProperty] private string? _routeTieText;
     [ObservableProperty] private string? _updateText;
+    [ObservableProperty] private string _updateAction = "Get it";
+    [ObservableProperty] private double _updateFraction;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdateActionEnabled))]
+    private bool _updateBusy;
+
+    /// <summary>The banner's button, greyed out only while the service is actually fetching.</summary>
+    public bool UpdateActionEnabled => !UpdateBusy;
     [ObservableProperty] private string? _redirectText;
     [ObservableProperty] private string? _serviceProblem;
     [ObservableProperty] private object? _overlay;
@@ -175,10 +183,11 @@ public partial class MainViewModel : ObservableObject
         RouteTieText = status.RouteTie?.Message;
         RedirectText = status.RedirectSummary;
         PauseDownloadsWhileGaming = status.DownloadsPause?.Enabled ?? false;
-        _updateUrl = status.Update?.Url;
-        UpdateText = status.Update is { } update
-            ? $"NetRoute {update.Version} is available. {update.Notes}".TrimEnd()
-            : null;
+        _update = status.Update;
+        UpdateText = status.Update is { } update ? Upgrade.Describe(update) : null;
+        UpdateAction = status.Update is { } next ? Upgrade.ButtonText(next) : "Get it";
+        UpdateFraction = status.Update?.Fraction ?? 0;
+        UpdateBusy = status.Update?.State == UpdateState.Downloading;
 
         // The problems the service already knows about. Check-up finds more when opened.
         var issues = (status.EnforcementPaused ? 1 : 0) + (status.RouteTie is null ? 0 : 1) + (status.RedirectionAvailable ? 0 : 1)
@@ -547,25 +556,69 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private string? _updateUrl;
+    private UpdateDto? _update;
 
-    /// <summary>Opens the download page. NetRoute never installs an update by itself.</summary>
+    /// <summary>
+    /// The one button on the update banner: fetch it, run it, or open the page when the feed
+    /// published no hash for NetRoute to check the download against.
+    /// </summary>
     [RelayCommand]
-    private void GetUpdate()
+    private async Task GetUpdate()
     {
-        if (_updateUrl is null)
+        if (_update is not { } update)
         {
             return;
         }
-        try
+        switch (update.State)
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_updateUrl) { UseShellExecute = true });
+            case UpdateState.Ready:
+                if (await Upgrade.StartAsync(update) is { } problem)
+                {
+                    ShowToast(problem);
+                }
+                return;
+
+            case UpdateState.Downloading:
+                return;
+
+            case UpdateState.Available when update.Sha256 is { Length: 64 }:
+            case UpdateState.Failed:
+                try
+                {
+                    var found = await Client.DownloadUpdateAsync();
+                    UpdateText = found is null ? null : Upgrade.Describe(found);
+                    UpdateAction = found is null ? "Get it" : Upgrade.ButtonText(found);
+                    UpdateBusy = found?.State == UpdateState.Downloading;
+                }
+                catch (Exception ex)
+                {
+                    App.Log(ex);
+                    ShowToast("The update couldn't be fetched. Updates in Check-up has the details.");
+                }
+                return;
+
+            default:
+                // No hash to check it against, so NetRoute sends the user to the page instead of downloading.
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(update.Url) { UseShellExecute = true });
+                }
+                catch (Exception ex)
+                {
+                    App.Log(ex);
+                    ShowToast("Couldn't open the download page.");
+                }
+                return;
         }
-        catch (Exception ex)
-        {
-            App.Log(ex);
-            ShowToast("Couldn't open the download page.");
-        }
+    }
+
+    /// <summary>The Updates panel: where to look, whether to look, and what was found.</summary>
+    [RelayCommand]
+    private async Task ShowUpdates()
+    {
+        var vm = new UpdatesViewModel(this);
+        Overlay = vm;
+        await vm.LoadAsync();
     }
 
     [RelayCommand]
@@ -1083,6 +1136,20 @@ public static class Format
         < 1024d * 1024 * 1024 => $"{bytes / 1024 / 1024:0.0} MB",
         _ => $"{bytes / 1024 / 1024 / 1024:0.00} GB"
     };
+
+    /// <summary>"just now", "20 minutes ago", "yesterday at 21:04" — how a person would say it.</summary>
+    public static string Ago(DateTimeOffset at)
+    {
+        var since = DateTimeOffset.Now - at.ToLocalTime();
+        return since switch
+        {
+            { TotalMinutes: < 2 } => "just now",
+            { TotalMinutes: < 60 } => $"{since.TotalMinutes:0} minutes ago",
+            { TotalHours: < 24 } => $"{since.TotalHours:0} hours ago",
+            { TotalDays: < 2 } => $"yesterday at {at.ToLocalTime():HH:mm}",
+            _ => $"on {at.ToLocalTime():d MMMM}"
+        };
+    }
 }
 
 /// <summary>

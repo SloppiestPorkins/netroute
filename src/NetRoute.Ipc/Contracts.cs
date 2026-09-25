@@ -217,8 +217,46 @@ public sealed record ConnectionHistoryDto(
 /// <summary>What a download app is working on, read from its own files (see SteamDownloads).</summary>
 public sealed record DownloadActivityDto(string App, string Item, double BytesRemaining);
 
+/// <summary>How far along a newer NetRoute is: seen, being fetched, or sitting on disk ready to run.</summary>
+public enum UpdateState
+{
+    Available,
+    Downloading,
+    Ready,
+    Failed
+}
+
 /// <summary>A newer NetRoute, when the user has configured somewhere to look for one.</summary>
-public sealed record UpdateDto(string Version, string Url, string? Notes);
+public sealed record UpdateDto(string Version, string Url, string? Notes)
+{
+    public UpdateState State { get; init; } = UpdateState.Available;
+
+    /// <summary>How much of the download is done, 0 to 1.</summary>
+    public double Fraction { get; init; }
+
+    public long SizeBytes { get; init; }
+
+    /// <summary>The verified installer on this PC, once <see cref="State"/> is Ready.</summary>
+    public string? ReadyPath { get; init; }
+
+    /// <summary>The hash the feed promised, so whoever runs the file can check it again first.</summary>
+    public string? Sha256 { get; init; }
+
+    /// <summary>Why the check or the download stopped, in plain words.</summary>
+    public string? Problem { get; init; }
+}
+
+/// <param name="CurrentVersion">The version running now.</param>
+/// <param name="FeedUrl">Where to look, or null when the user has not said.</param>
+/// <param name="Automatic">Check daily and fetch what is found. Installing is always the user's click.</param>
+public sealed record UpdateSettingsDto(
+    string CurrentVersion,
+    string? FeedUrl,
+    bool Automatic,
+    DateTimeOffset? CheckedAt,
+    UpdateDto? Available);
+
+public sealed record SetUpdateSettingsRequest(string? FeedUrl, bool Automatic);
 
 /// <param name="Enabled">The user's setting.</param>
 /// <param name="Active">Filters are in place right now.</param>

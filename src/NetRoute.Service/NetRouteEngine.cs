@@ -371,6 +371,23 @@ public sealed class NetRouteEngine : IDisposable
 
     public IReadOnlyList<ConnectionHistoryDto> GetConnectionHistory(int limit) => _connectionHistory.Recent(limit);
 
+    public Task<UpdateDto?> CheckForUpdateAsync(CancellationToken ct = default) => _updates.CheckAsync(ct);
+
+    public Task<UpdateDto?> DownloadUpdateAsync(CancellationToken ct = default) => _updates.DownloadAsync(ct);
+
+    public UpdateSettingsDto GetUpdateSettings() => _updates.Settings();
+
+    /// <summary>Saves where to look for updates, then looks, so the answer is there when the user asks.</summary>
+    public async Task SetUpdateSettingsAsync(string? feedUrl, bool automatic, CancellationToken ct = default)
+    {
+        var url = string.IsNullOrWhiteSpace(feedUrl) ? null : feedUrl.Trim();
+        await MutateAsync(config => config with { UpdateFeedUrl = url, AutomaticUpdates = automatic }, ct);
+        if (url is not null)
+        {
+            await _updates.CheckAsync(ct);
+        }
+    }
+
     private IReadOnlyList<DownloadActivityDto> _downloading = [];
     private DateTimeOffset _downloadingAt = DateTimeOffset.MinValue;
 

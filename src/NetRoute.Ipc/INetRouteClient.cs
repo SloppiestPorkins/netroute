@@ -68,4 +68,15 @@ public interface INetRouteClient
 
     /// <summary>Where apps have been connecting recently, newest first.</summary>
     Task<IReadOnlyList<ConnectionHistoryDto>> GetConnectionHistoryAsync(int limit, CancellationToken ct = default);
+
+    /// <summary>Ask the update feed now, rather than waiting for the daily check.</summary>
+    Task<UpdateDto?> CheckForUpdateAsync(CancellationToken ct = default);
+
+    /// <summary>Start fetching the update; watch its progress on the status. Nothing is installed by the service.</summary>
+    Task<UpdateDto?> DownloadUpdateAsync(CancellationToken ct = default);
+
+    Task<UpdateSettingsDto> GetUpdateSettingsAsync(CancellationToken ct = default);
+
+    /// <summary>Set where to look for updates, and whether to look without being asked.</summary>
+    Task SetUpdateSettingsAsync(string? feedUrl, bool automatic, CancellationToken ct = default);
 }
