@@ -181,6 +181,9 @@ public sealed class SetupModel : Observable
     public bool DesktopShortcut { get => _desktopShortcut; set => Set(ref _desktopShortcut, value); }
     public bool LaunchWhenDone { get => _launchWhenDone; set => Set(ref _launchWhenDone, value); }
     public bool RemoveSettings { get => _removeSettings; set => Set(ref _removeSettings, value); }
+    /// <summary>Something could only be replaced at the next restart, so /quiet can say 3010.</summary>
+    public bool RestartNeeded => _engine?.RestartNeeded == true;
+
     public bool Succeeded { get => _succeeded; private set => Set(ref _succeeded, value); }
     public bool Failed { get => _failed; private set => Set(ref _failed, value); }
     public double Progress { get => _progress; set => Set(ref _progress, value); }

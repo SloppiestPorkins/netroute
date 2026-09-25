@@ -540,12 +540,47 @@ internal sealed class SetupEngine
     }
 
     /// <summary>Stops a service if it's running. True if it was.</summary>
+    /// <summary>
+    /// Tries a file operation a few times before treating it as a lock.
+    ///
+    /// <para>Something briefly holding a file it is about to let go of — a virus scanner reading
+    /// what was just written, a process on its way out — is common and passes in under a second.
+    /// Queuing a replacement for the next restart is the right answer for a file that is genuinely
+    /// in use, and the wrong one for a file that was busy for 200 milliseconds.</para>
+    /// </summary>
+    private static void Retry(Action work)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                work();
+                return;
+            }
+            catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < 8)
+            {
+                Thread.Sleep(250 * attempt);
+            }
+        }
+    }
+
     private bool StopService(string name)
     {
         if (!(Machine.Status(name) is ServiceControllerStatus status) || status == ServiceControllerStatus.Stopped)
         {
             return false;
         }
+
+        // Take the recovery actions off first. NetRoute is configured to restart itself five
+        // seconds after it ever stops, which is right in normal life and wrong here: a service
+        // that comes back while setup is copying holds its own files open, and the new version
+        // ends up queued for the next restart instead of installed. RegisterService puts the
+        // recovery actions back at the end of every install.
+        if (name == Machine.ServiceName)
+        {
+            Machine.Run(Machine.Sc, $"failure {name} reset= 0 actions= \"\"", _log, out _, 30000);
+        }
+
         using (var service = new ServiceController(name))
         {
             try
@@ -565,8 +600,40 @@ internal sealed class SetupEngine
                 throw new SetupException($"Windows wouldn't stop the {name} service: {ex.InnerException?.Message ?? ex.Message}");
             }
         }
+        WaitForExit(name);
         _log.Write($"Stopped {name}.");
         return true;
+    }
+
+    /// <summary>
+    /// Waits for the service's process to actually go away.
+    ///
+    /// <para>Windows reports a service as stopped when it has acknowledged the stop, not when its
+    /// process has exited, and for those last moments the program still holds its own files open.
+    /// Copying into that gap is how an update ends up queued for the next restart while setup
+    /// reports that it installed.</para>
+    /// </summary>
+    private void WaitForExit(string name)
+    {
+        var image = name == Machine.ServiceName ? Path.GetFileNameWithoutExtension(Machine.ServiceExe) : null;
+        if (image == null)
+        {
+            return;
+        }
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            var running = Process.GetProcessesByName(image);
+            foreach (var process in running)
+            {
+                process.Dispose();
+            }
+            if (running.Length == 0)
+            {
+                return;
+            }
+            Thread.Sleep(500);
+        }
+        _log.Write($"  {image}.exe is still running 15 seconds after the service stopped.");
     }
 
     private void StartService(string name)
@@ -620,7 +687,7 @@ internal sealed class SetupEngine
             Directory.CreateDirectory(Path.GetDirectoryName(destination));
             try
             {
-                File.Copy(file, destination, true);
+                Retry(() => File.Copy(file, destination, true));
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
             {
@@ -628,6 +695,7 @@ internal sealed class SetupEngine
                 {
                     continue;
                 }
+                _log.Write($"  {Path.GetFileName(destination)} is locked: {ex.Message}");
                 var pending = destination + ".pending";
                 File.Copy(file, pending, true);
                 if (!Machine.ReplaceAtRestart(pending, destination))
