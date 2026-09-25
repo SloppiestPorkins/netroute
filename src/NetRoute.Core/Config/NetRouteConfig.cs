@@ -26,6 +26,13 @@ public sealed record NetRouteConfig
     /// </summary>
     public bool RouteSystemDownloads { get; init; } = true;
 
+    /// <summary>
+    /// Block Downloads apps while a Gaming app is running. Off by default: with two connections
+    /// the downloads are already on the other line. It is what makes NetRoute useful on a PC
+    /// with only one connection, where separating traffic isn't possible at all.
+    /// </summary>
+    public bool PauseDownloadsWhileGaming { get; init; }
+
     public RoleBinding? BindingFor(RoleId role)
         => RoleBindings.FirstOrDefault(b => b.Role == role);
 }

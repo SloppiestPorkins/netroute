@@ -26,13 +26,14 @@ public sealed class NoDefaultRoutes : IDefaultRouteSource
 
 public interface IPolicyPlanResolver
 {
-    EnforcementPlan Resolve(NetRouteConfig config);
+    EnforcementPlan Resolve(NetRouteConfig config, bool gamingActive = false, string? gameName = null);
 }
 
 public sealed class PolicyPlanResolver(IAdapterSource adapters) : IPolicyPlanResolver
 {
     private readonly PolicyResolver _resolver = new(adapters);
-    public EnforcementPlan Resolve(NetRouteConfig config) => _resolver.Resolve(config);
+    public EnforcementPlan Resolve(NetRouteConfig config, bool gamingActive = false, string? gameName = null)
+        => _resolver.Resolve(config, gamingActive, gameName);
 }
 
 /// <summary>Owns service state; one gate makes mutations and reconciliation atomic.</summary>
@@ -47,6 +48,8 @@ public sealed class NetRouteEngine : IDisposable
     private readonly IDefaultRouteSource _routes;
     private readonly ILinkQualitySource _links;
     private readonly IAppRateSource _rates;
+    private readonly SelfTestRunner? _selfTest;
+    private readonly IUsageHistory _history;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _systemDownloadsError;
     private readonly List<ServiceEventDto> _events = [];
@@ -68,10 +71,14 @@ public sealed class NetRouteEngine : IDisposable
         IPolicyPlanResolver? resolver = null,
         IDefaultRouteSource? routes = null,
         ILinkQualitySource? links = null,
-        IAppRateSource? rates = null)
+        IAppRateSource? rates = null,
+        SelfTestRunner? selfTest = null,
+        IUsageHistory? history = null)
     {
         _links = links ?? new NoLinkQuality();
         _rates = rates ?? new NoAppRates();
+        _selfTest = selfTest;
+        _history = history ?? new NoUsageHistory();
         _store = new ConfigStore(configPath);
         _adapters = adapters;
         _backend = backend;
@@ -117,6 +124,7 @@ public sealed class NetRouteEngine : IDisposable
                 EnforcementPaused = config.EnforcementPaused,
                 PausedUntil = config.EnforcementPaused ? config.PausedUntil : null,
                 SystemDownloads = DescribeSystemDownloads(config),
+                DownloadsPause = new DownloadsPauseDto(config.PauseDownloadsWhileGaming, _plan?.DownloadsPausedFor),
                 RedirectionAvailable = _backend.RedirectionAvailable,
                 RedirectSummary = _redirectSummary,
                 Roles = BuildRoles(config, adapters),
@@ -280,6 +288,60 @@ public sealed class NetRouteEngine : IDisposable
         finally { _gate.Release(); }
     }
 
+    /// <summary>
+    /// The name of a Gaming app with live connections, or null. Runtime state the resolver can't
+    /// see, and the trigger for pausing downloads while you play.
+    /// </summary>
+    private string? GameInPlay(NetRouteConfig config)
+    {
+        try
+        {
+            var connections = _connections.GetConnections();
+            foreach (var rule in config.AppRules.Where(r => r.Role == RoleId.Gaming && !r.Paused))
+            {
+                var app = VersionedPaths.Resolve(rule.App);
+                if (connections.Any(c => AppMatching.Covers(app, c.ExecutablePath, c.PackageFamilyName)))
+                {
+                    return app.DisplayName;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Never let looking for a game stop enforcement.
+        }
+        return null;
+    }
+
+    public Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default)
+        => MutateAsync(config => config with { PauseDownloadsWhileGaming = enabled }, ct);
+
+    public SelfTestDto GetSelfTest()
+        => _selfTest?.State ?? new SelfTestDto(false, null, [], "This build can't run the test.");
+
+    /// <summary>Gathers what the test needs, then starts it outside the gate: it takes ~30 seconds.</summary>
+    public async Task<SelfTestDto> StartSelfTestAsync(CancellationToken ct = default)
+    {
+        if (_selfTest is null)
+        {
+            return GetSelfTest();
+        }
+        var status = await GetStatusAsync(ct);
+        var adapters = _adapters.DiscoverAll();
+        NetworkAdapter? For(RoleId role) => status.Roles.FirstOrDefault(r => r.Role == role)?.Adapter is { } dto
+            ? adapters.FirstOrDefault(a => a.Luid == dto.Luid)
+            : null;
+        return _selfTest.Start(new SelfTestInput(
+            For(RoleId.Gaming),
+            For(RoleId.Downloads),
+            status.RedirectionAvailable,
+            status.EnforcementPaused,
+            status.Apps.Where(a => a.Verification == VerificationState.Verified)
+                .Select(a => $"{a.Rule.App.DisplayName} on {a.ObservedAdapterName}").ToList()));
+    }
+
+    public UsageHistoryDto GetUsageHistory(int days) => _history.Summarise(days);
+
     private RouteTie? FindTie(IReadOnlyList<NetworkAdapter> adapters)
     {
         try
@@ -307,7 +369,8 @@ public sealed class NetRouteEngine : IDisposable
 
     private void ReconcileLocked(NetRouteConfig config)
     {
-        var plan = _resolver.Resolve(config);
+        var playing = config.PauseDownloadsWhileGaming ? GameInPlay(config) : null;
+        var plan = _resolver.Resolve(config, playing is not null, playing);
         RecordHealthTransitions(config, plan);
         var fingerprint = Fingerprint(plan);
         if (fingerprint != _fingerprint)

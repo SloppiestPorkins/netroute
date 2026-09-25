@@ -297,23 +297,10 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
         => path.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.Windows), StringComparison.OrdinalIgnoreCase);
 }
 
-/// <summary>Whether a rule covers a running program: same file, inside the rule's install folder, or the same package.</summary>
+/// <summary>The shared matcher, so the GUI agrees with the service about what an app is.</summary>
 public static class AppMatch
 {
-    public static bool Covers(AppIdentity rule, string? path, string? package)
-    {
-        if (rule.Kind == AppIdentityKind.Packaged)
-        {
-            return package is not null && string.Equals(rule.PackageFamilyName, package, StringComparison.OrdinalIgnoreCase);
-        }
-        if (path is null)
-        {
-            return false;
-        }
-        // IsOwnFile leaves game libraries out: a game in Steam\steamapps isn't "Steam".
-        return string.Equals(rule.ExecutablePath, path, StringComparison.OrdinalIgnoreCase)
-               || (rule.InstallLocation is { Length: > 0 } root && NetRoute.Windows.Split.SplitImagePaths.IsOwnFile(root, path));
-    }
+    public static bool Covers(AppIdentity rule, string? path, string? package) => AppMatching.Covers(rule, path, package);
 }
 
 /// <summary>Game launchers and stores: the apps whose whole job is downloading.</summary>

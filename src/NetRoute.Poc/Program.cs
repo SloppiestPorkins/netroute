@@ -28,6 +28,8 @@ internal static class Program
                 return await SplitProof.RunAsync();
             case "routes":
                 return RouteTableProof.Run();
+            case "selftest":
+                return await SelfTestProof.RunAsync();
             case "probe":
                 return MeterProof.Probe();
             case "meter":

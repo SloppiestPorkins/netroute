@@ -45,6 +45,10 @@ public static class IpcCommands
     public const string FixRouteTie = "fixRouteTie";
     public const string GetAppRates = "getAppRates";
     public const string SetSystemDownloads = "setSystemDownloads";
+    public const string SetPauseDownloads = "setPauseDownloads";
+    public const string StartSelfTest = "startSelfTest";
+    public const string GetSelfTest = "getSelfTest";
+    public const string GetUsageHistory = "getUsageHistory";
 }
 
 public sealed record IpcRequest

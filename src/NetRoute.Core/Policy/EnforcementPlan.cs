@@ -65,4 +65,7 @@ public sealed record EnforcementPlan
 
     /// <summary>Windows' download services, when they should be kept on Downloads right now.</summary>
     public SystemDownloadsPlan? SystemDownloads { get; init; }
+
+    /// <summary>The game whose running paused the Downloads apps, when that is switched on.</summary>
+    public string? DownloadsPausedFor { get; init; }
 }

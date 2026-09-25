@@ -28,6 +28,11 @@ builder.ConfigureServices(services =>
     services.AddSingleton<AppRateMonitor>();
     services.AddSingleton<IAppRateSource>(sp => sp.GetRequiredService<AppRateMonitor>());
     services.AddHostedService(sp => sp.GetRequiredService<AppRateMonitor>());
+    // The on-demand proof, and the usage history that feeds "what used my gaming line last night".
+    services.AddSingleton<SelfTestRunner>();
+    services.AddSingleton<UsageHistory>();
+    services.AddSingleton<IUsageHistory>(sp => sp.GetRequiredService<UsageHistory>());
+    services.AddHostedService(sp => sp.GetRequiredService<UsageHistory>());
     services.AddSingleton<NetRouteEngine>();
     services.AddSingleton<NamedPipeServer>();
     services.AddHostedService<ServiceWorker>();

@@ -18,7 +18,11 @@ public sealed class PolicyResolver
 
     public PolicyResolver(IAdapterSource discovery) => _discovery = discovery;
 
-    public EnforcementPlan Resolve(NetRouteConfig config)
+    /// <param name="gamingActive">
+    /// A Gaming app has live connections right now. Runtime state, so the caller measures it and
+    /// passes it in: it decides whether Downloads apps are paused (config.PauseDownloadsWhileGaming).
+    /// </param>
+    public EnforcementPlan Resolve(NetRouteConfig config, bool gamingActive = false, string? gameName = null)
     {
         var adapters = _discovery.DiscoverAll();
 
@@ -32,8 +36,9 @@ public sealed class PolicyResolver
 
         // Resolve versioned install folders first, so enforcement always targets the program
         // that actually runs today rather than the one that ran when the rule was added.
+        var pausing = gamingActive && config.PauseDownloadsWhileGaming;
         var applications = config.AppRules
-            .Select(rule => Resolve(rule with { App = VersionedPaths.Resolve(rule.App) }, config, resolvedRoles))
+            .Select(rule => Resolve(rule with { App = VersionedPaths.Resolve(rule.App) }, config, resolvedRoles, pausing, gameName))
             .ToList();
 
         var degraded = resolvedRoles
@@ -51,7 +56,13 @@ public sealed class PolicyResolver
             ? new SystemDownloadsPlan(downloads, downloads.IsIpv4Only, SystemDownloadsPlan.WindowsDownloadServices)
             : null;
 
-        return new EnforcementPlan { Applications = applications, DegradedRoles = degraded, SystemDownloads = system };
+        return new EnforcementPlan
+        {
+            Applications = applications,
+            DegradedRoles = degraded,
+            SystemDownloads = system,
+            DownloadsPausedFor = pausing ? gameName ?? "a game" : null
+        };
     }
 
     private static NetworkAdapter? ResolveBinding(RoleBinding binding, IReadOnlyList<NetworkAdapter> adapters)
@@ -63,7 +74,9 @@ public sealed class PolicyResolver
     private AppEnforcement Resolve(
         AppRule rule,
         NetRouteConfig config,
-        IReadOnlyDictionary<RoleId, NetworkAdapter?> resolvedRoles)
+        IReadOnlyDictionary<RoleId, NetworkAdapter?> resolvedRoles,
+        bool pausingDownloads,
+        string? gameName)
     {
         var reasons = new List<Reason>();
 
@@ -95,6 +108,15 @@ public sealed class PolicyResolver
             reasons.Add(Reason.Bad(LocalHostingApps.Explain(rule.App)));
             reasons.Add(Reason.Ok("It works normally, on whichever connection Windows uses."));
             return Plan(rule, EnforcementAction.None, null, false, reasons);
+        }
+
+        // Downloads paused while you play. Blocking a downloader is safe: they all resume by
+        // themselves, and this is the only thing NetRoute can do on a PC with one connection.
+        if (pausingDownloads && rule.Role == RoleId.Downloads)
+        {
+            reasons.Add(Reason.Bad($"{gameName ?? "A game"} is running, and you asked NetRoute to pause downloads while you play."));
+            reasons.Add(Reason.Ok("It starts again by itself when you stop playing."));
+            return Plan(rule, EnforcementAction.BlockAll, null, true, reasons);
         }
 
         var binding = config.BindingFor(rule.Role);

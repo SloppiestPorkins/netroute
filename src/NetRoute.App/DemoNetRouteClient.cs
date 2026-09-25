@@ -26,6 +26,8 @@ public sealed class DemoNetRouteClient : INetRouteClient
     private bool _tied = true;
     private DateTimeOffset? _pausedUntil;
     private bool _systemDownloads = true;
+    private bool _pauseDownloads;
+    private SelfTestDto _selfTest = new(false, null, [], "Not run yet.");
 
     public DemoNetRouteClient(bool firstRun)
     {
@@ -115,6 +117,7 @@ public sealed class DemoNetRouteClient : INetRouteClient
             SystemDownloads = _systemDownloads
                 ? new SystemDownloadsDto(true, !_paused, "On. Windows Update, Microsoft Store and Xbox app downloads are kept on Wi-Fi 2, with IPv6 blocked because Wi-Fi 2 has none.")
                 : new SystemDownloadsDto(false, false, "Off. Windows Update, Microsoft Store and Xbox app downloads use whichever connection Windows picks."),
+            DownloadsPause = new DownloadsPauseDto(_pauseDownloads, null),
             RedirectionAvailable = true,
             RedirectSummary = $"On. {_rules.Count(r => r.Role == RoleId.Gaming)} Gaming apps are moved onto Ethernet; Wi-Fi 2 is Windows' default connection.",
             Roles = [Role(RoleId.Gaming, _adapters[0], 12, 0), Role(RoleId.Downloads, _adapters[1], 21, 0.4)],
@@ -191,6 +194,49 @@ public sealed class DemoNetRouteClient : INetRouteClient
     {
         _systemDownloads = enabled;
         return Task.CompletedTask;
+    }
+
+    public Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default)
+    {
+        _pauseDownloads = enabled;
+        return Task.CompletedTask;
+    }
+
+    public Task<SelfTestDto> StartSelfTestAsync(CancellationToken ct = default)
+    {
+        _selfTest = new SelfTestDto(false, DateTimeOffset.Now,
+        [
+            new SelfTestStepDto("Each connection reaches the internet", SelfTestState.Pass,
+                "Ethernet (192.168.0.51) comes out as 82.20.175.139. Wi-Fi 2 (192.168.7.7) comes out as 143.58.12.9."),
+            new SelfTestStepDto("They are separate lines", SelfTestState.Pass,
+                "Different public addresses (82.20.175.139 and 143.58.12.9), so they really are two lines."),
+            new SelfTestStepDto("Apps are being moved", SelfTestState.Pass,
+                "Verified from real traffic: Steam on Wi-Fi 2, Discord on Ethernet, Halo Infinite on Ethernet."),
+            new SelfTestStepDto("A download doesn't slow your gaming line", SelfTestState.Pass,
+                "Ethernet stayed at 12 ms (was 11 ms) while Wi-Fi 2 pulled 11.4 MB/s. That's the separation working: a download can't take your gaming line's latency.")
+        ], "Everything checks out.");
+        return Task.FromResult(_selfTest);
+    }
+
+    public Task<SelfTestDto> GetSelfTestAsync(CancellationToken ct = default) => Task.FromResult(_selfTest);
+
+    public Task<UsageHistoryDto> GetUsageHistoryAsync(int days, CancellationToken ct = default)
+    {
+        var random = new Random(7);
+        var byDay = new List<UsageDayDto>();
+        for (var back = Math.Min(days, 7) - 1; back >= 0; back--)
+        {
+            var day = DateTime.Today.AddDays(-back).ToString("yyyy-MM-dd");
+            byDay.Add(new UsageDayDto(day, "Wi-Fi 2", random.Next(2, 40) * 1024d * 1024 * 1024, random.Next(1, 3) * 1024d * 1024 * 200));
+            byDay.Add(new UsageDayDto(day, "Ethernet", random.Next(1, 6) * 1024d * 1024 * 700, random.Next(1, 4) * 1024d * 1024 * 300));
+        }
+        return Task.FromResult(new UsageHistoryDto(byDay,
+        [
+            new UsageAppDto("steam", "Wi-Fi 2", 84d * 1024 * 1024 * 1024, 1.2 * 1024 * 1024 * 1024),
+            new UsageAppDto("HaloInfinite", "Ethernet", 3.1 * 1024 * 1024 * 1024, 0.9 * 1024 * 1024 * 1024),
+            new UsageAppDto("Discord", "Ethernet", 1.4 * 1024 * 1024 * 1024, 0.6 * 1024 * 1024 * 1024),
+            new UsageAppDto("brave", "Wi-Fi 2", 0.9 * 1024 * 1024 * 1024, 0.1 * 1024 * 1024 * 1024)
+        ], null, @"C:\ProgramData\NetRoute\history"));
     }
 
     public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default)

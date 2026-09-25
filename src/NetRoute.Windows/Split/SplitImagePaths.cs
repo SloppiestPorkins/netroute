@@ -149,9 +149,9 @@ public static partial class SplitImagePaths
                 {
                     foreach (var sub in Directory.EnumerateDirectories(dir))
                     {
-                        if (depth == 0 && LibraryFolders.Contains(Path.GetFileName(sub), StringComparer.OrdinalIgnoreCase))
+                        if (depth == 0 && AppMatching.LibraryFolders.Contains(Path.GetFileName(sub), StringComparer.OrdinalIgnoreCase))
                         {
-                            continue;   // see LibraryFolders
+                            continue;   // see AppMatching.LibraryFolders
                         }
                         pending.Enqueue((sub, depth + 1));
                     }

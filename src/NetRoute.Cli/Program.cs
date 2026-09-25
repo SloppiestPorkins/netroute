@@ -15,6 +15,9 @@ const string Usage = """
           apps | roles | why <app>       details
           pause [minutes] | resume       stop or restart enforcement, keeping your rules
           system-downloads on|off        keep Windows Update, Store and Xbox downloads on Downloads
+          pause-downloads on|off         pause download apps while a game is running
+          selftest                       prove the separation works, end to end
+          history [days]                 how much each app used, per connection
           emergency-disable              remove every NetRoute rule from Windows right now
           fix-routes                     give Windows one default connection when two are tied
         """;
@@ -61,6 +64,17 @@ static async Task<int> RunAsync(string[] args)
             case "add" when args.Length >= 3: return await AddAsync(client, string.Join(' ', args[1..^1]), args[^1]);
             case "move" when args.Length >= 3: return await MoveAsync(client, string.Join(' ', args[1..^1]), args[^1]);
             case "remove" when args.Length >= 2: return await RemoveAsync(client, string.Join(' ', args[1..]));
+            case "pause-downloads" when args.Length > 1 && args[1] is "on" or "off":
+            {
+                var on = args[1] == "on";
+                await client.SetPauseDownloadsAsync(on);
+                Console.WriteLine(on
+                    ? "Download apps will be blocked while a game is running, and start again when you stop."
+                    : "Download apps keep running while you play.");
+                break;
+            }
+            case "selftest": return await SelfTestAsync(client);
+            case "history": return await HistoryAsync(client, args.Length > 1 && int.TryParse(args[1], out var requested) ? requested : 7);
             case "cleanup-driver": return LocalCleanup(removeSublayers: args.Contains("--remove-sublayers"));
             case "fix-routes":
             {
@@ -78,6 +92,73 @@ static async Task<int> RunAsync(string[] args)
     catch (NetRouteServiceException ex) { Console.Error.WriteLine(ex.Error.FriendlyMessage); return 1; }
     catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
 }
+
+/// <summary>Runs the service's self-test, printing each step as it lands.</summary>
+static async Task<int> SelfTestAsync(INetRouteClient client)
+{
+    var test = await client.StartSelfTestAsync();
+    var printed = 0;
+    while (true)
+    {
+        while (printed < test.Steps.Count && test.Steps[printed].State is not (SelfTestState.Pending or SelfTestState.Running))
+        {
+            var step = test.Steps[printed++];
+            var mark = step.State switch
+            {
+                SelfTestState.Pass => "OK  ",
+                SelfTestState.Warn => "!!  ",
+                SelfTestState.Fail => "FAIL",
+                _ => "    "
+            };
+            Console.WriteLine($"{mark} {step.Title}");
+            Console.WriteLine($"     {step.Detail}");
+        }
+        if (!test.Running)
+        {
+            break;
+        }
+        await Task.Delay(1000);
+        test = await client.GetSelfTestAsync();
+    }
+    Console.WriteLine();
+    Console.WriteLine(test.Summary);
+    return test.Steps.Any(s => s.State == SelfTestState.Fail) ? 1 : 0;
+}
+
+static async Task<int> HistoryAsync(INetRouteClient client, int days)
+{
+    var history = await client.GetUsageHistoryAsync(days);
+    if (history.Problem is { } problem)
+    {
+        Console.Error.WriteLine(problem);
+        return 1;
+    }
+    if (history.Days.Count == 0)
+    {
+        Console.WriteLine("Nothing recorded yet. NetRoute writes usage while apps are actually using the network.");
+        return 0;
+    }
+    Console.WriteLine($"Last {days} day(s), by connection:");
+    foreach (var day in history.Days.GroupBy(d => d.Day))
+    {
+        Console.WriteLine($"  {day.Key}   " + string.Join("   ", day.Select(d => $"{d.Adapter}: {Size(d.DownBytes)} down, {Size(d.UpBytes)} up")));
+    }
+    Console.WriteLine("\nTop apps:");
+    foreach (var app in history.TopApps.Take(12))
+    {
+        Console.WriteLine($"  {app.App,-24} {app.Adapter,-16} {Size(app.DownBytes)} down, {Size(app.UpBytes)} up");
+    }
+    Console.WriteLine($"\nDaily CSVs: {history.Folder}");
+    return 0;
+}
+
+static string Size(double bytes) => bytes switch
+{
+    < 1024 => $"{bytes:0} B",
+    < 1024 * 1024 => $"{bytes / 1024:0.0} KB",
+    < 1024d * 1024 * 1024 => $"{bytes / 1024 / 1024:0.0} MB",
+    _ => $"{bytes / 1024 / 1024 / 1024:0.00} GB"
+};
 
 static void PrintAdapters(IEnumerable<AdapterDto> adapters)
 {
@@ -234,6 +315,12 @@ static void PrintStatus(ServiceStatusDto status)
         ? status.PausedUntil is { } until ? $"Enforcement: paused until {until.ToLocalTime():HH:mm}" : "Enforcement: paused"
         : status.EnforcementActive ? "Enforcement: active" : "Enforcement: unavailable");
     if (status.SystemDownloads is { } system) Console.WriteLine($"Windows downloads: {system.Summary}");
+    if (status.DownloadsPause is { Enabled: true } pause)
+    {
+        Console.WriteLine(pause.PausedFor is { } game
+            ? $"Downloads: paused while {game} is running."
+            : "Downloads: will pause while a game is running.");
+    }
     if (status.LastError is { } error) Console.WriteLine($"Problem: {error.FriendlyMessage}");
     if (status.RedirectSummary is { } redirect) Console.WriteLine($"Moving apps: {redirect}");
     if (status.RouteTie is { } tie) Console.WriteLine($"Problem: {tie.Message} Run 'netroute fix-routes' to fix it.");

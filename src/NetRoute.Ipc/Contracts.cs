@@ -23,6 +23,10 @@ public sealed record SetPausedRequest(bool Paused, int? Minutes = null);
 
 public sealed record SetSystemDownloadsRequest(bool Enabled);
 
+public sealed record SetPauseDownloadsRequest(bool Enabled);
+
+public sealed record UsageHistoryRequest(int Days);
+
 // ---- Responses ----
 
 /// <summary>A network adapter as the GUI needs it. Identity is the LUID (§7).</summary>
@@ -159,6 +163,9 @@ public sealed record ServiceStatusDto
     /// <summary>Whether Windows Update, Store and Xbox downloads are kept on Downloads.</summary>
     public SystemDownloadsDto? SystemDownloads { get; init; }
 
+    /// <summary>Whether Downloads apps are paused while a game runs, and what is pausing them.</summary>
+    public DownloadsPauseDto? DownloadsPause { get; init; }
+
     /// <summary>
     /// The bind-redirect driver is loaded. Without it NetRoute can block but not move
     /// traffic; the GUI must say so rather than imply otherwise.
@@ -208,6 +215,35 @@ public sealed record AppRateDto
 
 /// <param name="Available">False when the service couldn't start measuring; <paramref name="Problem"/> says why.</param>
 public sealed record AppRatesDto(bool Available, string? Problem, IReadOnlyList<AppRateDto> Rates);
+
+public enum SelfTestState
+{
+    Pending,
+    Running,
+    Pass,
+    Warn,
+    Fail
+}
+
+public sealed record SelfTestStepDto(string Title, SelfTestState State, string? Detail);
+
+/// <summary>The on-demand proof that the separation works. See SelfTestRunner.</summary>
+public sealed record SelfTestDto(bool Running, DateTimeOffset? FinishedAt, IReadOnlyList<SelfTestStepDto> Steps, string Summary);
+
+/// <param name="Enabled">The user's setting.</param>
+/// <param name="PausedFor">The game currently pausing the Downloads apps, when one is.</param>
+public sealed record DownloadsPauseDto(bool Enabled, string? PausedFor);
+
+public sealed record UsageDayDto(string Day, string Adapter, double DownBytes, double UpBytes);
+
+public sealed record UsageAppDto(string App, string Adapter, double DownBytes, double UpBytes);
+
+/// <param name="Folder">Where the daily CSVs live, so the user can open or delete them.</param>
+public sealed record UsageHistoryDto(
+    IReadOnlyList<UsageDayDto> Days,
+    IReadOnlyList<UsageAppDto> TopApps,
+    string? Problem,
+    string Folder);
 
 /// <summary>Result of changing which adapter a role points at (§38).</summary>
 public sealed record RoleChangeResultDto(RoleId Role, string AdapterName, int AffectedApps, string Message);

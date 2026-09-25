@@ -13,6 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="..\NetRoute.Core\NetRoute.Core.csproj" />
     <ProjectReference Include="..\NetRoute.Windows\NetRoute.Windows.csproj" />
+    <!-- So `netroute-poc selftest` can run the service's own test without installing anything. -->
+    <ProjectReference Include="..\NetRoute.Service\NetRoute.Service.csproj" />
   </ItemGroup>
 
 </Project>

@@ -7,6 +7,9 @@ using NetRoute.Core.Adapters;
 
 namespace NetRoute.Windows.Traffic;
 
+/// <summary>Everything one program has moved through one adapter since the service started.</summary>
+public sealed record ProcessTotal(string App, string? Adapter, long DownBytes, long UpBytes);
+
 /// <summary>How fast one program is moving data through one adapter right now.</summary>
 public sealed record ProcessRate(
     int ProcessId,
@@ -34,6 +37,7 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
     private readonly ConcurrentDictionary<(int Pid, IPAddress? Local), Counter> _counters = new();
     private readonly ProcessIdentityCache _processes = new();
     private readonly object _gate = new();
+    private readonly Dictionary<(string App, string Adapter), (long Down, long Up)> _totals = [];
     private volatile Dictionary<IPAddress, NetworkAdapter> _local = [];
     private TraceEventSession? _session;
     private Dictionary<(int Pid, IPAddress? Local), (long Down, long Up)> _previous = [];
@@ -131,9 +135,14 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
 
                 var (path, package) = _processes.Get(key.Pid);
                 var adapter = key.Local is null ? null : byAddress.GetValueOrDefault(key.Local);
-                result.Add(new ProcessRate(
-                    key.Pid, path is null ? $"Process {key.Pid}" : Path.GetFileNameWithoutExtension(path), path, package,
-                    adapter?.Luid, adapter?.Name, deltaDown / seconds, deltaUp / seconds));
+                var name = path is null ? $"Process {key.Pid}" : Path.GetFileNameWithoutExtension(path);
+                result.Add(new ProcessRate(key.Pid, name, path, package, adapter?.Luid, adapter?.Name,
+                    deltaDown / seconds, deltaUp / seconds));
+
+                // Accumulated here, where each delta is counted exactly once, whoever asked.
+                var totalKey = (name, adapter?.Name ?? "");
+                var running = _totals.GetValueOrDefault(totalKey);
+                _totals[totalKey] = (running.Down + Math.Max(0, deltaDown), running.Up + Math.Max(0, deltaUp));
             }
 
             _previous = current.Where(kv => _counters.ContainsKey(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -142,6 +151,15 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
             _last = result;
             _lastAt = now;
             return result;
+        }
+    }
+
+    /// <summary>Running totals per program and adapter, for the usage history.</summary>
+    public IReadOnlyList<ProcessTotal> Totals()
+    {
+        lock (_gate)
+        {
+            return _totals.Select(e => new ProcessTotal(e.Key.App, e.Key.Adapter.Length == 0 ? null : e.Key.Adapter, e.Value.Down, e.Value.Up)).ToList();
         }
     }
 

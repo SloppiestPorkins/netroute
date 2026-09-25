@@ -51,4 +51,15 @@ public interface INetRouteClient
 
     /// <summary>Keep Windows Update, Store and Xbox downloads on Downloads (see SystemDownloadsPlan).</summary>
     Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default);
+
+    /// <summary>Block Downloads apps while a Gaming app is running.</summary>
+    Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default);
+
+    /// <summary>Start the "prove it" test; poll <see cref="GetSelfTestAsync"/> while it runs.</summary>
+    Task<SelfTestDto> StartSelfTestAsync(CancellationToken ct = default);
+
+    Task<SelfTestDto> GetSelfTestAsync(CancellationToken ct = default);
+
+    /// <summary>Per-day and per-app usage for the last <paramref name="days"/> days.</summary>
+    Task<UsageHistoryDto> GetUsageHistoryAsync(int days, CancellationToken ct = default);
 }
