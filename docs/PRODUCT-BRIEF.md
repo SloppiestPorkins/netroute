@@ -355,8 +355,11 @@ Rules, in order of importance:
   link.
 - Downloads land in `%ProgramData%\NetRoute\updates`, writable only by SYSTEM and
   administrators, and are hashed again immediately before being run elevated.
-- Nothing is configured out of the box: with no feed address, NetRoute never calls
-  anywhere.
+- The feed defaults to NetRoute's own repository, which is where its releases are, and is
+  one constant (`Core/Config/Updates.cs`) so a fork is a single edit. Clearing the address
+  means NetRoute never calls anywhere, and the app says so rather than going quiet.
+- When there is nothing to verify against, or a fetch has already failed, the user is sent
+  to that version’s release page rather than offered a download NetRoute cannot check.
 
 ## §45 Security
 Never disable Defender or the Windows Firewall, disable anti-cheat, modify game files,

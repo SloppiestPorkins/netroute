@@ -78,7 +78,10 @@ netroute emergency-disable           remove every NetRoute filter from Windows, 
 
 ## Updating itself
 
-Opt-in, and it points wherever you tell it. The feed is one JSON document over https:
+NetRoute reads [`updates.json`](updates.json) from this repository once a day and offers
+whatever is on the [releases page](https://github.com/SloppiestPorkins/netroute/releases).
+Point it somewhere else, or clear it and it never calls anywhere. The feed is one JSON
+document over https:
 
 ```json
 { "version": "1.2.0",
@@ -86,11 +89,14 @@ Opt-in, and it points wherever you tell it. The feed is one JSON document over h
   "sha256": "5E88...", "size": 76128256, "notes": "One line for the banner." }
 ```
 
-The service checks daily, fetches into a folder only SYSTEM and administrators can write
-to, and proves the bytes match the digest. It never installs anything: the app or the CLI
-runs setup and Windows asks for administrator. No sha256 means no download, only a link —
-the installer isn't code-signed, so that digest is the only thing tying the bytes to the
-version you chose to trust. With no address set, NetRoute never calls anywhere.
+The service fetches into a folder only SYSTEM and administrators can write to and proves
+the bytes match the digest — a download that hashes differently is deleted, not kept. It
+never installs anything: the app or the CLI runs setup and Windows asks for administrator.
+No sha256 means no download, only a link to the release page, because the installer isn't
+code-signed and that digest is the only thing tying the bytes to the version you trusted.
+
+Releasing a new version is: `scripts\build-installer.ps1`, publish the exe as the
+`v<version>` release, copy `dist\updates.json` to the repository root.
 
 ## Honest limits
 

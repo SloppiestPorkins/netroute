@@ -138,8 +138,14 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
         var file = Destination(found);
         if (found.Sha256 is { Length: > 0 } sha && File.Exists(file) && Hash(file).Equals(sha, StringComparison.OrdinalIgnoreCase))
         {
+            Tidy(file);
             return Available = found with { State = UpdateState.Ready, ReadyPath = file, Fraction = 1 };
         }
+
+        // Anything else staged here is a version that is no longer the answer — a download that
+        // failed its hash check, or one this user never got round to installing. Tens of megabytes
+        // either way, and keeping an installer nobody is going to run is how a stale one gets run.
+        Tidy(file);
         return Available = found;
     }
 
@@ -360,6 +366,10 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
     {
         try
         {
+            if (!Directory.Exists(Folder))
+            {
+                return;
+            }
             foreach (var file in Directory.GetFiles(Folder, "NetRoute-Setup-*.exe")
                          .Where(f => !f.Equals(keep, StringComparison.OrdinalIgnoreCase)))
             {
