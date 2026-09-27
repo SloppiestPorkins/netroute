@@ -6,8 +6,10 @@ downloads on the other, so a Steam download can't cost you the game you're playi
 You pick which connection is 🎮 **Gaming** and which is ⬇ **Downloads**, then assign apps
 with one click. Nothing is injected into any process and no game file is touched.
 
+[![Build](https://github.com/SloppiestPorkins/netroute/actions/workflows/build.yml/badge.svg)](https://github.com/SloppiestPorkins/netroute/actions/workflows/build.yml)
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
 ![.NET 8](https://img.shields.io/badge/.NET-8-512BD4)
+[![MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 
 ## Why it exists
 
@@ -109,6 +111,10 @@ Releasing a new version is: `scripts\build-installer.ps1`, publish the exe as th
   to fix, because Windows will otherwise split traffic across both.
 - Mullvad VPN's own background service is turned off while NetRoute runs — only one
   program can hold the driver. Removing NetRoute turns it back on.
+
+## Licence
+
+MIT — see [LICENSE](LICENSE). Fork it, ship it, sell it; keep the copyright notice.
 
 ## Third party
 
