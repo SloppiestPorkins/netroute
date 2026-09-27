@@ -423,8 +423,8 @@
                 <StackPanel Grid.Row="1" Margin="0,18,0,0">
                     <TextBlock Text="Where to look" FontWeight="SemiBold" />
                     <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,8"
-                               Text="An https address answering with the version, the download link and its sha256. Leave it empty and NetRoute never calls anywhere." />
-                    <TextBox Text="{Binding FeedUrl, UpdateSourceTrigger=PropertyChanged}" Tag="https://example.com/netroute/updates.json" />
+                               Text="NetRoute's own releases, by default. Any https address answering with a version, a download link and its sha256 works. Leave it empty and NetRoute never calls anywhere." />
+                    <TextBox Text="{Binding FeedUrl, UpdateSourceTrigger=PropertyChanged}" Tag="https://raw.githubusercontent.com/&#8230;/updates.json" />
                     <CheckBox IsChecked="{Binding Automatic}" Margin="0,14,0,0">
                         <StackPanel>
                             <TextBlock Text="Look once a day and fetch what you find" FontWeight="SemiBold" />

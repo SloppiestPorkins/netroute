@@ -267,8 +267,8 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
         else if (settings.FeedUrl is null)
         {
             items.Add(HealthItem.Tip("NetRoute never checks for updates",
-                $"You are on {settings.CurrentVersion}, and NetRoute has nowhere to look, so it doesn't call anywhere. " +
-                "Give it an address and it will check daily, fetch what it finds and prove the download is genuine before you install it.",
+                $"You are on {settings.CurrentVersion}, and the update address has been cleared, so NetRoute doesn't call anywhere. " +
+                "Put it back and it checks NetRoute's own releases daily, fetches what it finds and proves the download is genuine before you install it.",
                 "Set that up", Open));
         }
         else if (!settings.Automatic)

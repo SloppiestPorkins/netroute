@@ -120,18 +120,18 @@ $hash = (Get-FileHash $setup -Algorithm SHA256).Hash
 Write-Host ("  {0}  ({1:N1} MB)" -f $item.FullName, ($item.Length / 1MB)) -ForegroundColor Green
 Write-Host "  SHA-256 $hash"
 
-# The update document, ready to publish beside the installer. NetRoute refuses to fetch a build
-# whose sha256 it cannot check, so this file is what makes in-app updating work at all: point
-# 'netroute update --feed' at wherever this ends up.
+# The update document. NetRoute reads updates.json from the repository and refuses to fetch a
+# build whose sha256 it cannot check, so releasing is: publish this exe as the v<version> release,
+# then commit this file to the repository root.
 $feed = Join-Path $dist 'updates.json'
 [ordered]@{
     version = $version
-    url     = "https://example.invalid/netroute/$($item.Name)"
+    url     = "https://github.com/SloppiestPorkins/netroute/releases/download/v$version/$($item.Name)"
     sha256  = $hash
     size    = $item.Length
     notes   = 'Edit this line: it is what the app shows beside the version.'
 } | ConvertTo-Json | ForEach-Object { [IO.File]::WriteAllText($feed, $_, (New-Object Text.UTF8Encoding $false)) }
-Write-Host "  Update document $feed (set its url before publishing)"
+Write-Host "  Update document $feed (edit its notes, then copy it to the repository root)"
 if (-not $sign) {
     Write-Host '  Unsigned: SmartScreen will warn on other PCs. See the notes at the top of build-installer.ps1.' -ForegroundColor Yellow
 }

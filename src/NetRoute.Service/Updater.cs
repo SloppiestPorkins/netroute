@@ -315,7 +315,11 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
         => Path.Combine(Folder, $"NetRoute-Setup-{update.Version}.exe");
 
     private static UpdateDto Failed(string version, string url, string problem)
-        => new(version, url, null) { State = UpdateState.Failed, Problem = problem };
+        => new(version, url is { Length: > 0 } ? url : Updates.ReleaseFor(version), null)
+        {
+            State = UpdateState.Failed,
+            Problem = problem
+        };
 
     private static string Hash(string path)
     {

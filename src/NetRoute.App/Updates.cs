@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using NetRoute.Core.Config;
 using NetRoute.Ipc;
 
 namespace NetRoute.App;
@@ -68,9 +69,19 @@ internal static class Upgrade
     {
         UpdateState.Downloading => "Getting it…",
         UpdateState.Ready => "Install now",
-        UpdateState.Failed => "Try again",
+        UpdateState.Failed => "Open GitHub",
         _ => update.Sha256 is { Length: 64 } ? "Download" : "Get it"
     };
+
+    /// <summary>
+    /// True when the honest answer is a web page rather than a progress bar: either the release
+    /// published no digest to check a download against, or fetching it has already gone wrong.
+    /// </summary>
+    public static bool SendToPage(UpdateDto update)
+        => update.State == UpdateState.Failed || update.Sha256 is not { Length: 64 };
+
+    /// <summary>The release's own page on GitHub, where the installer and the notes are.</summary>
+    public static string Page(UpdateDto update) => Updates.ReleaseFor(update.Version);
 }
 
 /// <summary>
@@ -117,7 +128,7 @@ public partial class UpdatesViewModel(MainViewModel main) : ObservableObject
         CheckedAtText = settings.CheckedAt is { } at
             ? "Last looked " + Format.Ago(at) + "."
             : settings.FeedUrl is null
-                ? "NetRoute has nowhere to look yet, so it never calls anywhere."
+                ? "The update address is empty, so NetRoute never calls anywhere."
                 : "It hasn't looked yet.";
         Apply(settings.Available);
     }
@@ -159,6 +170,12 @@ public partial class UpdatesViewModel(MainViewModel main) : ObservableObject
         {
             var problem = await Upgrade.StartAsync(_update);
             Problem = problem;
+            return;
+        }
+
+        if (_update is { } stuck && Upgrade.SendToPage(stuck))
+        {
+            main.OpenPage(Upgrade.Page(stuck));
             return;
         }
 

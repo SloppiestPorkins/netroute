@@ -49,10 +49,11 @@ public sealed record NetRouteConfig
     public QuietHours? DownloadQuietHours { get; init; }
 
     /// <summary>
-    /// Where to look for a newer NetRoute, as JSON: version, url, notes. Empty by default, since
-    /// a build nobody published has nowhere to look, and a check nobody asked for is a call home.
+    /// Where to look for a newer NetRoute, as JSON: version, url, sha256, notes. Defaults to
+    /// NetRoute's own repository, which is where its releases are. Clear it and NetRoute never
+    /// calls anywhere; point it somewhere else and it looks there instead.
     /// </summary>
-    public string? UpdateFeedUrl { get; init; }
+    public string? UpdateFeedUrl { get; init; } = Updates.Feed;
 
     /// <summary>
     /// Check that address daily and fetch what it finds, so the update is ready when the user

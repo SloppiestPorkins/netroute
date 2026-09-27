@@ -133,7 +133,7 @@ static async Task<int> UpdateAsync(INetRouteClient client, string[] args)
     if (settings.FeedUrl is null)
     {
         Console.WriteLine("Nowhere to look, so NetRoute never calls anywhere.");
-        Console.WriteLine("Set one with: netroute update --feed https://example.com/netroute/updates.json");
+        Console.WriteLine("Put it back with: netroute update --feed " + NetRoute.Core.Config.Updates.Feed);
         return 0;
     }
 
@@ -146,6 +146,7 @@ static async Task<int> UpdateAsync(INetRouteClient client, string[] args)
     if (found.State == UpdateState.Failed)
     {
         Console.Error.WriteLine(found.Problem);
+        Console.Error.WriteLine("Releases are at " + NetRoute.Core.Config.Updates.Releases);
         return 1;
     }
     Console.WriteLine($"NetRoute {found.Version} is available." + (found.Notes is { Length: > 0 } notes ? " " + notes : ""));
@@ -154,7 +155,8 @@ static async Task<int> UpdateAsync(INetRouteClient client, string[] args)
     {
         if (found.Sha256 is not { Length: 64 })
         {
-            Console.WriteLine("It publishes no sha256, so NetRoute won't fetch it for you: " + found.Url);
+            Console.WriteLine("It publishes no sha256, so NetRoute won't fetch it for you.");
+            Console.WriteLine("Get it from " + NetRoute.Core.Config.Updates.ReleaseFor(found.Version));
             return 0;
         }
         found = await client.DownloadUpdateAsync();

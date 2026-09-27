@@ -582,7 +582,6 @@ public partial class MainViewModel : ObservableObject
                 return;
 
             case UpdateState.Available when update.Sha256 is { Length: 64 }:
-            case UpdateState.Failed:
                 try
                 {
                     var found = await Client.DownloadUpdateAsync();
@@ -598,17 +597,24 @@ public partial class MainViewModel : ObservableObject
                 return;
 
             default:
-                // No hash to check it against, so NetRoute sends the user to the page instead of downloading.
-                try
-                {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(update.Url) { UseShellExecute = true });
-                }
-                catch (Exception ex)
-                {
-                    App.Log(ex);
-                    ShowToast("Couldn't open the download page.");
-                }
+                // Either nothing to check a download against, or fetching it already went wrong.
+                // Both cases end at the release's own page on GitHub.
+                OpenPage(Upgrade.Page(update));
                 return;
+        }
+    }
+
+    /// <summary>Opens a page in the user's browser, and says so plainly when it can't.</summary>
+    internal void OpenPage(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            App.Log(ex);
+            ShowToast("Couldn't open " + url);
         }
     }
 

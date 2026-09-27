@@ -1,0 +1,7 @@
+{
+  "version": "1.1.0",
+  "url": "https://github.com/SloppiestPorkins/netroute/releases/download/v1.1.0/NetRoute-Setup-1.1.0.exe",
+  "sha256": "D3FB5A1901C63B06E597549504556CA09D10F91D6C228B3FB7B8354998579DBB",
+  "size": 76110336,
+  "notes": "Updating: setup recognises an existing install, and NetRoute can fetch and verify its own releases."
+}
