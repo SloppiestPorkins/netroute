@@ -128,7 +128,7 @@ public partial class UpdatesViewModel(MainViewModel main) : ObservableObject
         CheckedAtText = settings.CheckedAt is { } at
             ? "Last looked " + Format.Ago(at) + "."
             : settings.FeedUrl is null
-                ? "The update address is empty, so NetRoute never calls anywhere."
+                ? "Update checks are off, so NetRoute never calls anywhere. Save to use the address below."
                 : "It hasn't looked yet.";
         Apply(settings.Available);
     }
