@@ -115,6 +115,8 @@ Releasing a new version is: `scripts\build-installer.ps1`, publish the exe as th
 ## Licence
 
 MIT — see [LICENSE](LICENSE). Fork it, ship it, sell it; keep the copyright notice.
+That covers NetRoute's own code. The split-tunnel driver it ships stays under Mullvad's
+MPL-2.0, unmodified.
 
 ## Third party
 
