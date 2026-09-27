@@ -5,3 +5,7 @@ dist/
 *.user
 .vs/
 logs/
+
+# Stray files from mistyped commands
+/Ethernet
+/cd
