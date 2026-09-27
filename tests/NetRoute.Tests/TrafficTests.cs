@@ -114,12 +114,55 @@ public class TrafficTests
         Assert.Contains("No network activity", v.Summary);
     }
 
-    /// <summary>Other program files in the game's own folder count as the game (DayZ_BE starts DayZ_x64).</summary>
+    /// <summary>
+    /// Other program files in the game's own folder count as the game (DayZ_BE starts DayZ_x64).
+    ///
+    /// <para>The folder is made for real. NetRoute refuses to treat a path that isn't there as a
+    /// game root, so this can't be asserted about an imaginary one: the first version of this
+    /// test named a Steam library that happened to exist on the machine it was written on, and
+    /// failed the first time it ran anywhere else.</para>
+    /// </summary>
     [Fact]
     public void AnotherProgramInTheGameFolderCountsAsTheGame()
     {
-        var helper = @"G:\SteamLibrary\steamapps\common\Halo Infinite\bin\helper.exe";
-        Assert.True(TrafficVerdicts.Covers(AppIdentity.ForExecutable(Halo), Conn(helper, EthernetLuid, "Ethernet", Applied)));
+        using var game = new TempGame("Halo Infinite");
+
+        Assert.True(TrafficVerdicts.Covers(
+            AppIdentity.ForExecutable(game.Executable),
+            Conn(game.Path(@"bin\helper.exe"), EthernetLuid, "Ethernet", Applied)));
+    }
+
+    /// <summary>A game folder inside a Steam library, on disk, deleted afterwards.</summary>
+    private sealed class TempGame : IDisposable
+    {
+        private readonly string _library = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), "netroute-tests-" + Guid.NewGuid().ToString("N")[..8]);
+
+        public TempGame(string name)
+        {
+            Root = System.IO.Path.Combine(_library, "steamapps", "common", name);
+            System.IO.Directory.CreateDirectory(System.IO.Path.Combine(Root, "bin"));
+            Executable = System.IO.Path.Combine(Root, name.Replace(" ", "") + ".exe");
+            System.IO.File.WriteAllText(Executable, "");
+            System.IO.File.WriteAllText(Path(@"bin\helper.exe"), "");
+        }
+
+        public string Root { get; }
+        public string Executable { get; }
+
+        public string Path(string relative) => System.IO.Path.Combine(Root, relative);
+
+        public void Dispose()
+        {
+            try
+            {
+                System.IO.Directory.Delete(_library, recursive: true);
+            }
+            catch (System.IO.IOException)
+            {
+                // A test's leftovers in %TEMP% are not worth failing a run over.
+            }
+        }
     }
 
     // ---- helpers ----
