@@ -1,0 +1,56 @@
+name: Build
+
+# NetRoute is Windows-only by construction — WFP, a kernel driver, WPF — so there is no
+# cross-platform matrix to run. This is the check that the tree builds and the tests pass
+# on a machine that is not the one it was written on.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore NetRoute.sln
+
+      - name: Build
+        run: dotnet build NetRoute.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/NetRoute.Tests/NetRoute.Tests.csproj -c Release --no-build --verbosity normal
+
+      # The driver ships in the repository and is Mullvad's, signed by Mullvad. If that ever
+      # stops being true, every build should stop until someone has looked at why.
+      - name: Check the split-tunnel driver is still Mullvad's
+        shell: pwsh
+        run: |
+          $driver = 'third_party/mullvad-split-tunnel/mullvad-split-tunnel.sys'
+          $signature = Get-AuthenticodeSignature $driver
+          $signer = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '(none)' }
+          Write-Host "$($signature.Status): $signer"
+          if ($signature.Status -ne 'Valid' -or $signer -notmatch 'Mullvad|Amagicom') {
+            throw "The driver is not validly signed by Mullvad."
+          }
+
+      # The feed is what every installed copy reads to decide whether to update itself. A typo
+      # here is a broken update for everyone, and it is three fields and a hash.
+      - name: Check the update feed parses
+        shell: pwsh
+        run: |
+          $feed = Get-Content updates.json -Raw | ConvertFrom-Json
+          if (-not $feed.version -or -not $feed.url -or $feed.sha256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            throw "updates.json needs a version, a url and a 64-character sha256."
+          }
+          if ($feed.url -notlike 'https://*') { throw "The update url must be https." }
+          Write-Host "$($feed.version) -> $($feed.url)"
