@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
-  "url": "https://github.com/SloppiestPorkins/netroute/releases/download/v1.1.0/NetRoute-Setup-1.1.0.exe",
-  "sha256": "D3FB5A1901C63B06E597549504556CA09D10F91D6C228B3FB7B8354998579DBB",
+  "version": "1.1.1",
+  "url": "https://github.com/SloppiestPorkins/netroute/releases/download/v1.1.1/NetRoute-Setup-1.1.1.exe",
+  "sha256": "3FE35230DD12687C52E4759AADA2A076164F7E97136F25ADFCCA08D5975D9B06",
   "size": 76110336,
-  "notes": "Updating: setup recognises an existing install, and NetRoute can fetch and verify its own releases."
+  "notes": "Xbox and Game Pass downloads are now held on the Downloads line: Gaming Services was doing the fetching, and nothing was pinning it."
 }
