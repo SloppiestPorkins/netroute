@@ -47,6 +47,33 @@ public sealed class LocalHostingTests : IDisposable
     }
 
     [Fact]
+    public void ButItCanStillBeHeldOnTheDownloadsConnection()
+    {
+        // Downloads is held with filters, not the driver: nothing rewrites the app's binds, and
+        // LAN and localhost stay permitted, so a LAN world still works. What it does stop is the
+        // app using both lines at once, which is how CurseForge broke on 29 September 2026 --
+        // its IPv4 went out the downloads line and its IPv6 out the gaming one, from two
+        // different ISPs, and the service it signs in to did not enjoy that.
+        var source = new NetRouteEngineTests.MutableAdapterSource(NetRouteEngineTests.Ethernet(), NetRouteEngineTests.Wifi());
+        var curseforge = AppIdentity.ForExecutable(@"C:\Users\Jack\AppData\Local\Programs\CurseForge Windows\CurseForge.exe", "CurseForge");
+        var config = new NetRouteConfig
+        {
+            SetupCompleted = true,
+            RoleBindings =
+            [
+                Bind(RoleId.Gaming, NetRouteEngineTests.Ethernet()),
+                Bind(RoleId.Downloads, NetRouteEngineTests.Wifi())
+            ],
+            AppRules = [AppRule.Create(curseforge, RoleId.Downloads)]
+        };
+
+        var app = new PolicyResolver(source).Resolve(config).Applications.Single();
+
+        Assert.Equal(EnforcementAction.PinToAdapter, app.Action);
+        Assert.Equal(NetRouteEngineTests.Wifi().Luid, app.ResolvedAdapter?.Luid);
+    }
+
+    [Fact]
     public void AStoreAppsRuleFollowsItToTheNextVersion()
     {
         // Store apps install each update beside the last: Name_2.6.2.0_x64__hash, then _2.7.0.0_.

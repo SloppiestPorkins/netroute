@@ -1,5 +1,5 @@
 PackageIdentifier: NetRoute.NetRoute
-PackageVersion: 1.1.1
+PackageVersion: 1.1.2
 MinimumOSVersion: 10.0.19041.0
 InstallerType: exe
 Scope: machine
@@ -14,7 +14,7 @@ UpgradeBehavior: install
 ElevationRequirement: elevatesSelf
 AppsAndFeaturesEntries:
   - DisplayName: NetRoute
-    DisplayVersion: 1.1.1
+    DisplayVersion: 1.1.2
     Publisher: NetRoute
     ProductCode: NetRoute
     UpgradeCode: NetRoute
@@ -26,7 +26,7 @@ Installers:
   # Filled in at release: the published URL of dist\NetRoute-Setup-<version>.exe and its SHA-256
   # (scripts/build-installer.ps1 prints the hash).
   - Architecture: x64
-    InstallerUrl: https://example.invalid/NetRoute-Setup-1.1.1.exe
+    InstallerUrl: https://example.invalid/NetRoute-Setup-1.1.2.exe
     InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
 ManifestType: installer
 ManifestVersion: 1.6.0

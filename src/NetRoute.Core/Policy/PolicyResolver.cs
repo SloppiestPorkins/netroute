@@ -100,9 +100,12 @@ public sealed class PolicyResolver
 
         reasons.Add(Reason.Ok($"You assigned {rule.App.DisplayName} to {rule.Role.DisplayName()}."));
 
-        // Some apps can't survive being moved. Breaking one quietly would be worse than not
-        // moving it, so this is decided here, where "Why?" can explain it (see LocalHostingApps).
-        if (LocalHostingApps.Includes(rule.App))
+        // Some apps can't survive being *moved*. Being held to one connection is a different
+        // thing: that is filters rather than the driver, and LAN and localhost are permitted
+        // either way. So only Gaming is refused here. Downloads is the connection Windows
+        // already uses, and holding an app there is what stops it straddling both, which is
+        // its own way of breaking an app (see LocalHostingApps).
+        if (LocalHostingApps.Includes(rule.App) && rule.Role == RoleId.Gaming)
         {
             reasons.Add(Reason.Bad(LocalHostingApps.Explain(rule.App)));
             reasons.Add(Reason.Ok("It works normally, on whichever connection Windows uses."));

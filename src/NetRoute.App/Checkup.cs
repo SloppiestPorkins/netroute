@@ -213,6 +213,7 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             }
         }
 
+        AddSplitFamilyCheck(status, items);
         await AddUpdateChecks(items);
         await AddGamingLineChecks(status, items);
 
@@ -281,6 +282,36 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             items.Add(HealthItem.Fine($"You are on the newest NetRoute ({settings.CurrentVersion})",
                 settings.CheckedAt is { } at ? "Last looked " + Format.Ago(at) + "." : "It checks once a day.", "Check now", Open));
         }
+    }
+
+    /// <summary>
+    /// One connection has IPv6 and the other doesn't, so anything NetRoute isn't routing uses
+    /// both at once: IPv4 out of the one Windows prefers, IPv6 out of the only one that has it.
+    ///
+    /// <para>This is the quietest way NetRoute breaks an app. The app works, connects, and is on
+    /// two different ISPs at the same time, so anything that ties a session to the address it was
+    /// issued to sees a stranger halfway through. CurseForge did exactly this on 29 September
+    /// 2026. Apps with a role are already held to one line; apps without one are not.</para>
+    /// </summary>
+    private void AddSplitFamilyCheck(ServiceStatusDto status, List<HealthItem> items)
+    {
+        var gaming = status.Roles.FirstOrDefault(r => r.Role == RoleId.Gaming)?.Adapter;
+        var downloads = status.Roles.FirstOrDefault(r => r.Role == RoleId.Downloads)?.Adapter;
+        if (gaming is null || downloads is null || gaming.Luid == downloads.Luid
+            || !gaming.HasIpv6Route || downloads.HasIpv6Route)
+        {
+            return;
+        }
+
+        var loose = status.Apps.Count(a => a.Action == EnforcementAction.None);
+        items.Add(HealthItem.Tip($"{gaming.Name} has IPv6 and {downloads.Name} doesn't",
+            $"Apps you haven't given a role use {downloads.Name} for IPv4 and {gaming.Name} for IPv6 at the same time, "
+            + "which is two different ISPs in one session. Most apps don't mind; the ones that tie a sign-in to your "
+            + "address do, and they fail in ways that look nothing like a network problem. "
+            + (loose > 0
+                ? $"{loose} of your apps are on Windows routing. Giving one a role holds it to a single connection."
+                : "Giving an app a role holds it to a single connection."),
+            "Add an app", () => main.OpenAddAppAsync()));
     }
 
     private async Task AddGamingLineChecks(ServiceStatusDto status, List<HealthItem> items)

@@ -1,7 +1,7 @@
 {
-  "version": "1.1.1",
-  "url": "https://github.com/SloppiestPorkins/netroute/releases/download/v1.1.1/NetRoute-Setup-1.1.1.exe",
-  "sha256": "3FE35230DD12687C52E4759AADA2A076164F7E97136F25ADFCCA08D5975D9B06",
-  "size": 76110336,
-  "notes": "Xbox and Game Pass downloads are now held on the Downloads line: Gaming Services was doing the fetching, and nothing was pinning it."
+  "version": "1.1.2",
+  "url": "https://github.com/SloppiestPorkins/netroute/releases/download/v1.1.2/NetRoute-Setup-1.1.2.exe",
+  "sha256": "5B57B00968E096E71B77019CCED272DD122F2692AC8B15A8B41DC1A2F72DAC18",
+  "size": 76111360,
+  "notes": "Apps that host LAN games can now be held on the Downloads line, instead of straddling both connections."
 }
