@@ -303,14 +303,15 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             return;
         }
 
-        var loose = status.Apps.Count(a => a.Action == EnforcementAction.None);
-        items.Add(HealthItem.Tip($"{gaming.Name} has IPv6 and {downloads.Name} doesn't",
-            $"Apps you haven't given a role use {downloads.Name} for IPv4 and {gaming.Name} for IPv6 at the same time, "
-            + "which is two different ISPs in one session. Most apps don't mind; the ones that tie a sign-in to your "
-            + "address do, and they fail in ways that look nothing like a network problem. "
-            + (loose > 0
-                ? $"{loose} of your apps are on Windows routing. Giving one a role holds it to a single connection."
-                : "Giving an app a role holds it to a single connection."),
+        items.Add(HealthItem.Problem($"{gaming.Name} has IPv6 and {downloads.Name} doesn't",
+            $"This one difference causes most of what goes wrong here. Apps without a role use {downloads.Name} for "
+            + $"IPv4 and {gaming.Name} for IPv6 at the same time, which is two ISPs in one session and breaks anything "
+            + "that ties a sign-in to your address. And apps NetRoute does hold on Downloads have their IPv6 blocked, "
+            + "because Downloads has none to offer: that is how Xbox and Store installs fail, with error 0x87E00005. "
+            + $"The cure is to remove the difference. Open {gaming.Name}'s adapter properties and untick Internet "
+            + "Protocol Version 6, or run this as administrator:  Disable-NetAdapterBinding -Name \""
+            + gaming.Name + "\" -ComponentID ms_tcpip6  —  everything then uses IPv4, on whichever connection you "
+            + "chose for it. Xbox multiplayer prefers IPv6 but works without it.",
             "Add an app", () => main.OpenAddAppAsync()));
     }
 

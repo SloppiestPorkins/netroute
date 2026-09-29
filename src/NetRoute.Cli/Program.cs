@@ -355,13 +355,41 @@ static AppStatusDto? SingleApp(ServiceStatusDto status, string query)
     {
         matches = status.Apps.Where(a => a.Rule.App.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
     }
+    if (matches.Count > 1)
+    {
+        // Two rules can share a display name and differ only by which program they point at:
+        // the Xbox app registers XboxPcApp.exe and XboxPcAppFT.exe, both called "Xbox App".
+        // Matching the path as well means there is always a way to name the one you mean.
+        var byPath = status.Apps
+            .Where(a => Identifier(a).Contains(query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (byPath.Count == 1)
+        {
+            return byPath[0];
+        }
+    }
     if (matches.Count == 1)
     {
         return matches[0];
     }
-    Console.Error.WriteLine(matches.Count == 0 ? $"No app in your list matches '{query}'." : $"'{query}' matches several apps: {string.Join(", ", matches.Select(m => m.Rule.App.DisplayName))}.");
+    if (matches.Count == 0)
+    {
+        Console.Error.WriteLine($"No app in your list matches '{query}'.");
+        return null;
+    }
+
+    // Say what would tell them apart, rather than printing the same name twice.
+    Console.Error.WriteLine($"'{query}' matches several apps. Use enough of one of these to pick one:");
+    foreach (var match in matches)
+    {
+        Console.Error.WriteLine($"  {match.Rule.App.DisplayName}  ({Identifier(match)})");
+    }
     return null;
 }
+
+/// <summary>What distinguishes one rule from another with the same name.</summary>
+static string Identifier(AppStatusDto app)
+    => app.Rule.App.ExecutablePath ?? app.Rule.App.InstallLocation ?? app.Rule.App.PackageFamilyName ?? app.Rule.App.DisplayName;
 
 static RoleId? ParseRole(string text)
 {

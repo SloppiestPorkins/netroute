@@ -1,6 +1,6 @@
 # winget version manifest. See packaging/winget/README.md before submitting.
 PackageIdentifier: NetRoute.NetRoute
-PackageVersion: 1.1.2
+PackageVersion: 1.1.3
 DefaultLocale: en-GB
 ManifestType: version
 ManifestVersion: 1.6.0
