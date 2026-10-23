@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
@@ -19,7 +20,18 @@ public sealed record ProcessRate(
     ulong? AdapterLuid,
     string? AdapterName,
     double DownBytesPerSecond,
-    double UpBytesPerSecond);
+    double UpBytesPerSecond)
+{
+    /// <summary>The program's address on this adapter. A latency probe has to leave from it to travel the same line.</summary>
+    public IPAddress? LocalAddress { get; init; }
+
+    /// <summary>
+    /// The remote addresses it exchanged UDP with during the last reading, busiest first (at most
+    /// <see cref="ProcessNetworkMeter.PeersPerReading"/>). The UDP connection table has no remote
+    /// address, so this is the only place they can be learned. Empty for TCP, which has the table.
+    /// </summary>
+    public IReadOnlyList<IPAddress> UdpPeers { get; init; } = [];
+}
 
 /// <summary>
 /// Bytes per second for every program, per adapter, from the kernel's own TCP/IP events (ETW).
@@ -34,21 +46,68 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
 {
     private const string SessionName = "NetRoute-Network";
 
+    /// <summary>How many UDP peers are kept per reading for each program.</summary>
+    public const int PeersPerReading = 4;
+
+    // Distinct remote addresses remembered per program within one reading. A game talks to a
+    // handful; a torrent client to thousands, and nothing is gained by tracking them all.
+    internal const int MaxPeersTracked = 32;
+
     private readonly ConcurrentDictionary<(int Pid, IPAddress? Local), Counter> _counters = new();
     private readonly ProcessIdentityCache _processes = new();
     private readonly object _gate = new();
     private readonly Dictionary<(string App, string Adapter), (long Down, long Up)> _totals = [];
     private volatile Dictionary<IPAddress, NetworkAdapter> _local = [];
     private TraceEventSession? _session;
-    private Dictionary<(int Pid, IPAddress? Local), (long Down, long Up)> _previous = [];
     private DateTimeOffset _previousAt;
     private IReadOnlyList<ProcessRate> _last = [];
     private DateTimeOffset _lastAt;
+    private DateTimeOffset _addressesAt;
+    private volatile bool _addressesChanged;
 
-    private sealed class Counter
+    internal sealed class Counter
     {
         public long Down;
         public long Up;
+
+        // What the previous reading saw, so a reading is "now minus then" with no second
+        // dictionary built per second to hold the last totals. Touched only under the meter's gate.
+        public long SeenDown;
+        public long SeenUp;
+
+        private Dictionary<IPAddress, long>? _peers;
+
+        /// <summary>Called on the event thread for every UDP packet; the lock is uncontended except for the once-a-second read.</summary>
+        public void NotePeer(IPAddress peer, int size)
+        {
+            lock (this)
+            {
+                _peers ??= new Dictionary<IPAddress, long>();
+                if (_peers.TryGetValue(peer, out var bytes))
+                {
+                    _peers[peer] = bytes + size;
+                }
+                else if (_peers.Count < MaxPeersTracked)
+                {
+                    _peers[peer] = size;
+                }
+            }
+        }
+
+        /// <summary>The busiest peers since the last call, which then starts again.</summary>
+        public IReadOnlyList<IPAddress> TakePeers()
+        {
+            lock (this)
+            {
+                if (_peers is not { Count: > 0 })
+                {
+                    return [];
+                }
+                var top = _peers.OrderByDescending(p => p.Value).Take(PeersPerReading).Select(p => p.Key).ToList();
+                _peers.Clear();
+                return top;
+            }
+        }
     }
 
     public bool Running => _session is not null && Problem is null;
@@ -69,7 +128,8 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
         {
             return;
         }
-        RefreshAddresses();
+        RefreshAddresses(force: true);
+        NetworkChange.NetworkAddressChanged += OnAddressChanged;
         try
         {
             // A session left behind by a crashed service is replaced rather than joined.
@@ -79,12 +139,12 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
             var kernel = session.Source.Kernel;
             kernel.TcpIpRecv += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: true);
             kernel.TcpIpSend += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: false);
-            kernel.UdpIpRecv += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: true);
-            kernel.UdpIpSend += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: false);
+            kernel.UdpIpRecv += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: true, udp: true);
+            kernel.UdpIpSend += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: false, udp: true);
             kernel.TcpIpRecvIPV6 += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: true);
             kernel.TcpIpSendIPV6 += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: false);
-            kernel.UdpIpRecvIPV6 += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: true);
-            kernel.UdpIpSendIPV6 += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: false);
+            kernel.UdpIpRecvIPV6 += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: true, udp: true);
+            kernel.UdpIpSendIPV6 += d => Add(d.ProcessID, d.saddr, d.daddr, d.size, down: false, udp: true);
 
             _session = session;
             Problem = null;
@@ -119,40 +179,62 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
                 return _last;
             }
 
-            var byAddress = RefreshAddresses();
-            var current = _counters.ToDictionary(kv => kv.Key, kv => (Interlocked.Read(ref kv.Value.Down), Interlocked.Read(ref kv.Value.Up)));
+            var firstReading = _previousAt == default;
             var seconds = (now - _previousAt).TotalSeconds;
+            var unattributed = false;
             var result = new List<ProcessRate>();
-            foreach (var (key, (down, up)) in current)
+            var idle = (List<(int, IPAddress?)>?)null;
+            foreach (var (key, counter) in _counters)
             {
-                var (previousDown, previousUp) = _previous.GetValueOrDefault(key);
-                var deltaDown = down - previousDown;
-                var deltaUp = up - previousUp;
+                var down = Interlocked.Read(ref counter.Down);
+                var up = Interlocked.Read(ref counter.Up);
+                var deltaDown = down - counter.SeenDown;
+                var deltaUp = up - counter.SeenUp;
+                counter.SeenDown = down;
+                counter.SeenUp = up;
+                if (firstReading || seconds <= 0)
+                {
+                    continue;
+                }
                 if (deltaDown <= 0 && deltaUp <= 0)
                 {
                     // Idle since the last reading: forget it, so exited processes don't pile up.
                     // A packet arriving right now just starts a fresh counter.
-                    _counters.TryRemove(key, out _);
+                    (idle ??= []).Add(key);
                     continue;
                 }
-                if (_previousAt == default || seconds <= 0)
+                unattributed |= key.Local is null;
+                result.Add(new ProcessRate(key.Pid, "", null, null, null, null, deltaDown / seconds, deltaUp / seconds)
                 {
-                    continue;
+                    LocalAddress = key.Local,
+                    UdpPeers = counter.TakePeers()
+                });
+            }
+            if (idle is not null)
+            {
+                foreach (var key in idle)
+                {
+                    _counters.TryRemove(key, out _);
                 }
+            }
 
-                var (path, package) = _processes.Get(key.Pid);
-                var adapter = key.Local is null ? null : byAddress.GetValueOrDefault(key.Local);
-                var name = path is null ? $"Process {key.Pid}" : Path.GetFileNameWithoutExtension(path);
-                result.Add(new ProcessRate(key.Pid, name, path, package, adapter?.Luid, adapter?.Name,
-                    deltaDown / seconds, deltaUp / seconds));
+            // Identity and adapter are looked up only for the rows that are going to be reported,
+            // and the adapter map is rebuilt only when it may have changed (see RefreshAddresses).
+            var byAddress = RefreshAddresses(unattributed);
+            for (var i = 0; i < result.Count; i++)
+            {
+                var r = result[i];
+                var (path, package) = _processes.Get(r.ProcessId);
+                var adapter = r.LocalAddress is null ? null : byAddress.GetValueOrDefault(r.LocalAddress);
+                var name = path is null ? $"Process {r.ProcessId}" : Path.GetFileNameWithoutExtension(path);
+                result[i] = r with { ProcessName = name, ExecutablePath = path, PackageFamilyName = package, AdapterLuid = adapter?.Luid, AdapterName = adapter?.Name };
 
                 // Accumulated here, where each delta is counted exactly once, whoever asked.
                 var totalKey = (name, adapter?.Name ?? "");
                 var running = _totals.GetValueOrDefault(totalKey);
-                _totals[totalKey] = (running.Down + Math.Max(0, deltaDown), running.Up + Math.Max(0, deltaUp));
+                _totals[totalKey] = (running.Down + (long)Math.Round(r.DownBytesPerSecond * seconds), running.Up + (long)Math.Round(r.UpBytesPerSecond * seconds));
             }
 
-            _previous = current.Where(kv => _counters.ContainsKey(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
             _previousAt = now;
             _processes.Prune(_counters.Keys.Select(k => k.Pid));
             _last = result;
@@ -170,7 +252,7 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
         }
     }
 
-    private void Add(int pid, IPAddress a, IPAddress b, int size, bool down)
+    private void Add(int pid, IPAddress a, IPAddress b, int size, bool down, bool udp = false)
     {
         if (pid <= 4 || size <= 0 || (IPAddress.IsLoopback(a) && IPAddress.IsLoopback(b)))
         {
@@ -184,6 +266,10 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
             return;   // internet traffic only: a copy to the NAS isn't using either connection's ISP
         }
         var counter = _counters.GetOrAdd((pid, mine), _ => new Counter());
+        if (udp && mine is not null)
+        {
+            counter.NotePeer(ReferenceEquals(mine, a) ? b : a, size);
+        }
         if (down)
         {
             Interlocked.Add(ref counter.Down, size);
@@ -194,8 +280,21 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
         }
     }
 
-    private Dictionary<IPAddress, NetworkAdapter> RefreshAddresses()
+    /// <summary>
+    /// Adapter enumeration is a full GetAdaptersAddresses walk (addresses, gateways, DNS), so it is
+    /// not done every second. It runs when Windows says an address changed, when it has been a
+    /// while, or, at most every few seconds, when traffic turns up on an address no adapter owns
+    /// (a DHCP renewal that gave a new one).
+    /// </summary>
+    private Dictionary<IPAddress, NetworkAdapter> RefreshAddresses(bool unattributedTraffic = false, bool force = false)
     {
+        var now = DateTimeOffset.UtcNow;
+        if (!force && !NetRoute.Core.Traffic.AddressRefresh.ShouldRefresh(now - _addressesAt, _addressesChanged, unattributedTraffic))
+        {
+            return _local;
+        }
+        _addressesChanged = false;
+        _addressesAt = now;
         var map = new Dictionary<IPAddress, NetworkAdapter>();
         try
         {
@@ -221,8 +320,11 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
     private static IPAddress Normalize(IPAddress address)
         => address.AddressFamily == AddressFamily.InterNetworkV6 ? new IPAddress(address.GetAddressBytes()) : address;
 
+    private void OnAddressChanged(object? sender, EventArgs e) => _addressesChanged = true;
+
     public void Dispose()
     {
+        NetworkChange.NetworkAddressChanged -= OnAddressChanged;
         _session?.Dispose();
         _session = null;
     }

@@ -77,6 +77,32 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string _checkupText = "Check-up";
     [ObservableProperty] private NewGamePrompt? _newGame;
     private int _refreshCount;
+    private readonly LiveTracker _live = new();
+
+    /// <summary>
+    /// Whether anyone can see the window. Per-app speeds and latency are only asked for while this
+    /// is true: asking is what makes the service switch on its latency measurements, and a window
+    /// hidden in the tray should cost the service nothing.
+    /// </summary>
+    public bool LiveActive
+    {
+        get => _liveActive;
+        set
+        {
+            _liveActive = value;
+            if (!value)
+            {
+                // Nothing on screen may outlive its measurement: a strip left up while the window
+                // is hidden would be the first thing shown, as if current, when it is reopened.
+                foreach (var row in Apps)
+                {
+                    row.SetLive(null);
+                }
+            }
+        }
+    }
+
+    private bool _liveActive = true;
     private readonly HashSet<string> _notNow = new(StringComparer.OrdinalIgnoreCase);
 
     [ObservableProperty]
@@ -108,6 +134,7 @@ public partial class MainViewModel : ObservableObject
             ServiceProblem = null;
             Apply(status);
             UpdateRates();
+            await RefreshLiveAsync(status);
             if (Page == "Main" && NewGame is null && _refreshCount++ % 5 == 0)
             {
                 await DetectNewGameAsync();
@@ -214,6 +241,35 @@ public partial class MainViewModel : ObservableObject
         SyncApps(apps);
         RaiseNotifications(status.RecentEvents);
     }
+
+    /// <summary>
+    /// Per-app live figures for the main list. A failure here only blanks the live strip: the rest
+    /// of the window works from the status the service already returned.
+    /// </summary>
+    private async Task RefreshLiveAsync(ServiceStatusDto status)
+    {
+        if (!LiveActive || Page != "Main")
+        {
+            return;
+        }
+        AppRatesDto? rates = null;
+        try
+        {
+            rates = await _client.GetAppRatesAsync();
+        }
+        catch (Exception ex) when (ex is NetRouteServiceException or ServiceUnavailableException)
+        {
+        }
+
+        var live = _live.Update(status.Apps, rates, DateTimeOffset.UtcNow);
+        foreach (var row in Apps)
+        {
+            row.SetLive(live.GetValueOrDefault(row.Id));
+        }
+        LiveProblem = rates is { Available: false } ? rates.Problem : null;
+    }
+
+    [ObservableProperty] private string? _liveProblem;
 
     private readonly Dictionary<string, Counter> _counters = new(StringComparer.OrdinalIgnoreCase);
 
@@ -751,6 +807,7 @@ public partial class AppRowViewModel : ObservableObject
     {
         Id = dto.Rule.Id;
         Update(dto);
+        SetLive(null);
     }
 
     public Guid Id { get; }
@@ -768,6 +825,62 @@ public partial class AppRowViewModel : ObservableObject
     [ObservableProperty] private bool _isPaused;
     [ObservableProperty] private string _pauseGlyph = "";
     [ObservableProperty] private string _pauseTip = "Pause";
+
+    // Live strip: where the app really is, how fast, how laggy. Empty until the first reading.
+    [ObservableProperty] private bool _hasLive;
+    [ObservableProperty] private string _placeText = "";
+    [ObservableProperty] private string _placeGlyph = "";
+    [ObservableProperty] private Brush _placeBrush = Brushes.Gray;
+    [ObservableProperty] private Brush _placeTint = Brushes.Transparent;
+    [ObservableProperty] private Brush _cardBrush = Brushes.Gray;
+    [ObservableProperty] private Brush _cardFill = Brushes.Gray;
+    [ObservableProperty] private bool _isProblem;
+    [ObservableProperty] private string _rateText = "";
+    [ObservableProperty] private string? _latencyText;
+    [ObservableProperty] private string? _latencyTip;
+    [ObservableProperty] private Brush _latencyBrush = Brushes.Gray;
+    [ObservableProperty] private string _connectionText = "";
+    [ObservableProperty] private Brush _rateBrush = Brushes.Gray;
+
+    /// <summary>The verification sentence is shown when it adds something the strip doesn't: a problem, or no live data.</summary>
+    public bool ShowSummary => !HasLive || IsProblem || Dto.Error is not null || Dto.Verification is not (VerificationState.Verified or VerificationState.NotRunning or VerificationState.Configured);
+
+    /// <summary>Applies the latest live reading, or clears it when the service has none.</summary>
+    public void SetLive(LiveApp? live)
+    {
+        HasLive = live is not null;
+        if (live is null)
+        {
+            IsProblem = false;
+            CardBrush = Ui.Res("BorderBrush");
+            CardFill = Ui.Res("SurfaceBrush");
+            OnPropertyChanged(nameof(ShowSummary));
+            return;
+        }
+
+        var state = live.Placement.State;
+        IsProblem = live.Placement.IsProblem;
+        var (brush, tint, glyph) = state switch
+        {
+            PlacementState.Mismatch => ("BadBrush", "BadTintBrush", ""),
+            PlacementState.Split => ("WarnBrush", "WarnTintBrush", ""),
+            PlacementState.OnAssigned => ("GoodBrush", "GoodTintBrush", ""),
+            _ => ("MutedBrush", "NeutralTintBrush", "")
+        };
+        PlaceText = live.Headline;
+        PlaceGlyph = glyph;
+        PlaceBrush = Ui.Res(brush);
+        PlaceTint = Ui.Res(tint);
+        CardBrush = IsProblem ? Ui.Res(brush) : Ui.Res("BorderBrush");
+        CardFill = IsProblem ? Ui.Res(tint) : Ui.Res("SurfaceBrush");
+        RateText = live.RateText;
+        RateBrush = Ui.Res(live.HasTraffic ? "TextBrush" : "MutedBrush");
+        LatencyText = live.Latency;
+        LatencyTip = live.LatencyTip;
+        LatencyBrush = Ui.Res(live.LatencyKind == LatencyKind.NotMeasurable ? "MutedBrush" : "TextBrush");
+        ConnectionText = live.ConnectionText;
+        OnPropertyChanged(nameof(ShowSummary));
+    }
 
     public void Update(AppStatusDto dto)
     {
@@ -798,6 +911,7 @@ public partial class AppRowViewModel : ObservableObject
         StatusText = text;
         StatusBrush = Ui.Res(brush);
         StatusTint = Ui.Res(tint);
+        OnPropertyChanged(nameof(ShowSummary));
     }
 }
 
@@ -1139,40 +1253,25 @@ public sealed record ReasonLine(bool Good, string Text)
     public Brush Brush => Ui.Res(Good ? "GoodBrush" : "BadBrush");
 }
 
-/// <summary>Byte and speed formatting for people.</summary>
-public static class Format
-{
-    public static string Rate(double bytesPerSecond) => Bytes(bytesPerSecond) + "/s";
-
-    public static string Bytes(double bytes) => bytes switch
-    {
-        < 1024 => $"{bytes:0} B",
-        < 1024 * 1024 => $"{bytes / 1024:0.0} KB",
-        < 1024d * 1024 * 1024 => $"{bytes / 1024 / 1024:0.0} MB",
-        _ => $"{bytes / 1024 / 1024 / 1024:0.00} GB"
-    };
-
-    /// <summary>"just now", "20 minutes ago", "yesterday at 21:04" — how a person would say it.</summary>
-    public static string Ago(DateTimeOffset at)
-    {
-        var since = DateTimeOffset.Now - at.ToLocalTime();
-        return since switch
-        {
-            { TotalMinutes: < 2 } => "just now",
-            { TotalMinutes: < 60 } => $"{since.TotalMinutes:0} minutes ago",
-            { TotalHours: < 24 } => $"{since.TotalHours:0} hours ago",
-            { TotalDays: < 2 } => $"yesterday at {at.ToLocalTime():HH:mm}",
-            _ => $"on {at.ToLocalTime():d MMMM}"
-        };
-    }
-}
-
 /// <summary>
 /// "What's using each network": every app with live connections, grouped by the adapter
 /// the connections actually use. Not limited to apps with rules.
+///
+/// <para>Per-second samples are smoothed, rows keep their place between re-sorts, and an app that
+/// goes quiet for a moment keeps its row (empty of rate) for a few seconds instead of vanishing
+/// and reappearing. Apps that have a rule and are using a network other than the one they were
+/// assigned are marked on the row.</para>
 /// </summary>
 public partial class LiveViewModel(MainViewModel main) : ObservableObject
 {
+    /// <summary>How long a row whose app has gone quiet stays up before it is allowed to leave.</summary>
+    public static readonly TimeSpan Linger = TimeSpan.FromSeconds(8);
+
+    private readonly RateSmoother _rates = new();
+    private readonly ValueHold<(RttSummary Rtt, LatencyKind Kind)> _latency = new(LiveTracker.LatencyHold);
+    private readonly Dictionary<string, StickyOrder> _orders = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _lastSeen = new(StringComparer.OrdinalIgnoreCase);
+
     public ObservableCollection<LiveGroup> Groups { get; } = [];
 
     [ObservableProperty] private string? _empty = "Reading live connections…";
@@ -1204,45 +1303,101 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
         }
         var speeds = rates?.Rates.Where(r => r.InterfaceName is not null).ToList() ?? [];
 
+        var now = DateTimeOffset.UtcNow;
         static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
-        var groups = connections.Select(c => c.InterfaceName).Concat(speeds.Select(r => r.InterfaceName))
+        var assigned = main.Status?.Apps ?? [];
+
+        var adapters = connections.Select(c => c.InterfaceName).Concat(speeds.Select(r => r.InterfaceName))
             .OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Adapters an app was on a moment ago stay in the list too, so a group doesn't blink out
+        // when its last app goes quiet.
+        adapters.AddRange(_lastSeen.Where(e => now - e.Value <= Linger).Select(e => e.Key[..e.Key.IndexOf('|')])
+            .Distinct(StringComparer.OrdinalIgnoreCase).Where(a => !adapters.Contains(a, StringComparer.OrdinalIgnoreCase)));
+
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var groups = adapters
             .Select(adapter =>
             {
                 var sockets = connections.Where(c => Same(c.InterfaceName, adapter)).ToList();
                 var moving = speeds.Where(r => Same(r.InterfaceName, adapter)).ToList();
                 var card = main.Roles.FirstOrDefault(r => Same(r.AdapterName, adapter));
-                var items = sockets.Select(c => c.ProcessName).Concat(moving.Select(r => r.ProcessName))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Select(name =>
-                    {
-                        var mine = sockets.Where(c => Same(c.ProcessName, name)).ToList();
-                        var rate = moving.Where(r => Same(r.ProcessName, name)).ToList();
 
-                        // Only rows the service actually measured count; an app with none shows no latency at all.
-                        var latency = RttSummary.Combine(rate.Where(r => r.MedianRttMs is not null)
-                            .Select(r => new RttSummary(r.MedianRttMs!.Value, r.WorstRttMs ?? r.MedianRttMs.Value, Math.Max(1, r.RttConnections ?? 1))));
-                        return new LiveItem(name, Detail(mine), mine.Count, rate.Sum(r => r.DownBytesPerSecond), rate.Sum(r => r.UpBytesPerSecond), latency?.Describe());
-                    })
-                    .OrderByDescending(i => i.Down + i.Up)
-                    .ThenByDescending(i => i.Count)
+                var names = sockets.Select(c => c.ProcessName).Concat(moving.Select(r => r.ProcessName))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+                var items = names.Select(name =>
+                {
+                    var key = $"{adapter}|{name}";
+                    seenKeys.Add(key);
+                    _lastSeen[key] = now;
+                    var mine = sockets.Where(c => Same(c.ProcessName, name)).ToList();
+                    var rate = moving.Where(r => Same(r.ProcessName, name)).ToList();
+                    var (down, up) = _rates.Update(key, rate.Sum(r => r.DownBytesPerSecond), rate.Sum(r => r.UpBytesPerSecond), now);
+
+                    // Only rows the service actually measured count; an app with none shows no latency at all.
+                    var (latency, tip, _) = LatencyView.Describe(_latency.Get(key, LatencyView.Fresh(rate), now), LatencyView.TriedAndFailed(rate));
+                    return new LiveItem(name, Detail(mine), mine.Count, down, up, latency, tip)
+                    {
+                        Warning = Warning(assigned, rate, adapter)
+                    };
+                }).ToList();
+
+                // Apps that were here a moment ago and have gone quiet keep their row, idle, so
+                // the list doesn't jump as connections close and reopen.
+                foreach (var (key, at) in _lastSeen.ToList())
+                {
+                    var separator = key.IndexOf('|');
+                    if (!Same(key[..separator], adapter) || seenKeys.Contains(key) || now - at > Linger)
+                    {
+                        continue;
+                    }
+                    seenKeys.Add(key);
+                    var (down, up) = _rates.Update(key, 0, 0, now);
+                    items.Add(new LiveItem(key[(separator + 1)..], "", 0, down, up));
+                }
+
+                var order = _orders.TryGetValue(adapter, out var existing) ? existing : _orders[adapter] = new StickyOrder();
+                var sorted = order.Order(items.Select(i => (i.Name, i.Down + i.Up)).ToList(), now);
+                var rank = sorted.Select((n, i) => (n, i)).ToDictionary(x => x.n, x => x.i, StringComparer.OrdinalIgnoreCase);
+                items = items.OrderBy(i => rank[i.Name]).ToList();
+
                 var subtitle = card is null
                     ? $"{items.Count} app{(items.Count == 1 ? "" : "s")}"
                     : $"{card.Role.DisplayName()} network  ·  ↓ {card.DownRate}  ↑ {card.UpRate}";
                 return new LiveGroup(adapter, subtitle, card?.RoleBrush ?? Ui.Res("DefaultBrush"), card?.Glyph ?? Ui.Glyph(RoleId.Default),
-                    items.Take(12).ToList(), items.Count > 12 ? $"+ {items.Count - 12} more" : null, sockets.Count,
-                    moving.Sum(r => r.DownBytesPerSecond + r.UpBytesPerSecond));
+                    items.Take(12).ToList(), items.Count > 12 ? $"+ {items.Count - 12} more" : null, sockets.Count, 0);
             })
-            .OrderByDescending(g => g.Speed)
-            .ThenByDescending(g => g.Total)
+            // Gaming and Downloads first, in the order of the cards above, then the rest by name:
+            // a fixed order, so a group never jumps because it got busier.
+            .OrderBy(g => Position(g.Title))
+            .ThenBy(g => g.Title, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
 
-        Groups.Clear();
-        foreach (var group in groups)
+        _rates.Keep(seenKeys);
+        _latency.Keep(seenKeys);
+        foreach (var gone in _lastSeen.Keys.Where(k => !seenKeys.Contains(k)).ToList())
         {
-            Groups.Add(group);
+            _lastSeen.Remove(gone);
+        }
+
+        // Update in place when the shape is unchanged, so the list keeps its scroll position.
+        if (Groups.Count == groups.Count && Groups.Zip(groups).All(p => p.First.Title == p.Second.Title))
+        {
+            for (var i = 0; i < groups.Count; i++)
+            {
+                Groups[i] = groups[i];
+            }
+        }
+        else
+        {
+            Groups.Clear();
+            foreach (var group in groups)
+            {
+                Groups.Add(group);
+            }
         }
 
         var loose = connections.Count(c => c.InterfaceName is null);
@@ -1259,6 +1414,33 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
         Footnote = notes.Count == 0 ? null : string.Join("\n", notes);
     }
 
+    private int Position(string adapter)
+    {
+        for (var i = 0; i < main.Roles.Count; i++)
+        {
+            if (string.Equals(main.Roles[i].AdapterName, adapter, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+        return int.MaxValue;
+    }
+
+    /// <summary>"Assigned to Gaming (Ethernet)" when this app has a rule for a network other than the one it is on.</summary>
+    private static string? Warning(IReadOnlyList<AppStatusDto> assigned, List<AppRateDto> rows, string adapter)
+    {
+        foreach (var row in rows)
+        {
+            var rule = assigned.FirstOrDefault(a => AppMatching.Covers(a.Rule.App, row.ExecutablePath, row.PackageFamilyName));
+            if (rule is { Action: EnforcementAction.PinToAdapter, Rule.Paused: false, ResolvedAdapterName: { } expected }
+                && !string.Equals(expected, adapter, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"Assigned to {rule.Rule.Role.DisplayName()} ({expected})";
+            }
+        }
+        return null;
+    }
+
     private static string Detail(List<ConnectionDto> connections)
     {
         var tcp = connections.Count(c => c.Protocol == TransportProtocol.Tcp);
@@ -1272,10 +1454,14 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
 
 public sealed record LiveGroup(string Title, string Subtitle, Brush Accent, string Glyph, IReadOnlyList<LiveItem> Items, string? More, int Total, double Speed);
 
-/// <param name="Latency">TCP round trip, as text; null when not measured, so nothing is shown rather than "0 ms".</param>
-public sealed record LiveItem(string Name, string Detail, int Count, double Down, double Up, string? Latency = null)
+/// <param name="Latency">Round trip, as text, saying which kind it is; null when not measured, so nothing is shown rather than "0 ms".</param>
+/// <param name="LatencyTip">What that figure is and isn't.</param>
+public sealed record LiveItem(string Name, string Detail, int Count, double Down, double Up, string? Latency = null, string? LatencyTip = null)
 {
-    public string Rate => Down + Up >= 1 ? $"↓ {Format.Rate(Down)}   ↑ {Format.Rate(Up)}" : "";
+    /// <summary>Set when the app is on a network other than its assigned one.</summary>
+    public string? Warning { get; init; }
+
+    public string Rate => Down + Up >= 1 ? $"↓ {Format.Rate(Down)}   ↑ {Format.Rate(Up)}" : "idle";
 }
 
 /// <summary>A yes/no question with a destructive action.</summary>

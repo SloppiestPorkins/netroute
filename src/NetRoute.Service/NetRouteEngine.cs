@@ -557,6 +557,14 @@ public sealed class NetRouteEngine : IDisposable
     /// <summary>An apply slower than this is worth a warning: it stalls the app's own traffic while filters swap.</summary>
     private static readonly TimeSpan SlowApply = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// A commit slower than this is worth a warning on its own: the commit is the part where the filter
+    /// engine swaps the set in, and the only part that can hold up other programs' new connections.
+    /// A quarter of a second is far above what a diff of a few dozen filters should cost, and well
+    /// below the seconds an app would notice.
+    /// </summary>
+    private static readonly TimeSpan SlowCommit = TimeSpan.FromMilliseconds(250);
+
     /// <summary>The routine line is capped to one a minute so a flapping adapter cannot fill the Event Log.</summary>
     private static readonly TimeSpan RoutineLogInterval = TimeSpan.FromMinutes(1);
 
@@ -564,14 +572,14 @@ public sealed class NetRouteEngine : IDisposable
     private int _routineSuppressed;
 
     /// <summary>
-    /// One line per apply, so a latency spike in the user's apps can be lined up with a commit.
+    /// One line per apply (the counts are what actually changed in the engine, so an apply that found nothing to change says 0 and 0), so a latency spike in the user's apps can be lined up with a commit.
     /// The Event Log keeps only Warning and above unless configured otherwise, so anything a person
     /// needs to see (a failure or a slow apply) is logged at Warning and is never rate-limited;
     /// retries are already backed off. The routine case is Information and rate-limited.
     /// </summary>
     private void LogApply(BackendApplyResult result, string trigger, DateTimeOffset now)
     {
-        const string Format = "Filters applied in {ElapsedMs:F0} ms (commit {CommitMs:F0} ms): {Added} added, {Removed} removed, {Failed} rule(s) failed. Trigger: {Trigger}.";
+        const string Format = "Filters applied in {ElapsedMs:F0} ms (commit {CommitMs:F0} ms): {Added} filter(s) added, {Removed} removed, {Failed} rule(s) failed. Trigger: {Trigger}.";
         object[] args =
         [
             result.Elapsed.TotalMilliseconds, result.CommitTime.TotalMilliseconds,
@@ -581,6 +589,10 @@ public sealed class NetRouteEngine : IDisposable
         if (result.Failures.Count > 0 || result.SystemDownloadsError is not null)
         {
             _logger.LogWarning(Format + " Some rules were not applied; see the app's Check-up for which.", args);
+        }
+        else if (result.CommitTime >= SlowCommit)
+        {
+            _logger.LogWarning(Format + " The commit was slow; new connections from other programs may have stalled while it ran.", args);
         }
         else if (result.Elapsed >= SlowApply)
         {

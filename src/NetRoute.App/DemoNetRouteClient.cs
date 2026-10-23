@@ -41,6 +41,7 @@ public sealed class DemoNetRouteClient : INetRouteClient
             _rules.Add(AppRule.Create(AppIdentity.ForExecutable(@"C:\Program Files (x86)\Steam\steam.exe", "Steam"), RoleId.Downloads));
             _rules.Add(AppRule.Create(AppIdentity.ForExecutable(@"C:\Users\Jack\AppData\Local\Discord\Discord.exe", "Discord"), RoleId.Gaming));
             _rules.Add(AppRule.Create(AppIdentity.ForExecutable(@"C:\Program Files\BraveSoftware\Brave.exe", "Brave"), RoleId.Downloads));
+            _rules.Add(AppRule.Create(AppIdentity.ForExecutable(@"G:\SteamLibrary\steamapps\common\ForzaHorizon5\ForzaHorizon5.exe", "Forza Horizon 5"), RoleId.Gaming));
         }
     }
 
@@ -89,14 +90,16 @@ public sealed class DemoNetRouteClient : INetRouteClient
         {
             var adapter = r.Role == RoleId.Gaming ? _adapters[0] : _adapters[1];
             var verified = r.App.DisplayName != "Brave";
+            var leaking = r.App.DisplayName == "Forza Horizon 5";   // shows what a wrong-network app looks like
             return new AppStatusDto
             {
                 Rule = r,
                 Action = r.Role == RoleId.Default || _paused ? EnforcementAction.None : EnforcementAction.PinToAdapter,
                 Verification = r.Role == RoleId.Default || _paused ? VerificationState.NotEnforced
+                    : leaking ? VerificationState.Leak
                     : verified ? VerificationState.Verified : VerificationState.Configured,
                 ResolvedAdapterName = adapter.Name,
-                ObservedAdapterName = verified ? adapter.Name : null,
+                ObservedAdapterName = leaking ? _adapters[1].Name : verified ? adapter.Name : null,
                 ActiveConnections = verified ? 6 : 0,
                 PreexistingConnections = 0,
                 Reasons =
@@ -106,7 +109,8 @@ public sealed class DemoNetRouteClient : INetRouteClient
                     Reason.Ok($"{adapter.Name} is connected."),
                     Reason.Ok("Strict mode is enabled, so no other network may be used.")
                 ],
-                VerificationSummary = verified ? $"Actual traffic verified on {adapter.Name}." : $"Applied for {adapter.Name}; waiting to see traffic."
+                VerificationSummary = leaking ? $"Leak: new traffic seen on {_adapters[1].Name} instead of {adapter.Name}."
+                    : verified ? $"Actual traffic verified on {adapter.Name}." : $"Applied for {adapter.Name}; waiting to see traffic."
             };
         }).ToList();
 
@@ -293,18 +297,23 @@ public sealed class DemoNetRouteClient : INetRouteClient
 
     public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default)
     {
-        AppRateDto Rate(string name, int pid, string adapter, double downMb, double upKb, string? path = null, int? rtt = null, int? worst = null) => new()
+        AppRateDto Rate(string name, int pid, string adapter, double downMb, double upKb, string? path = null, int? rtt = null, int? worst = null,
+            LatencyKind? kind = null, int peers = 4) => new()
         {
             ProcessId = pid, ProcessName = name, ExecutablePath = path, InterfaceName = adapter,
             DownBytesPerSecond = downMb * 1024 * 1024, UpBytesPerSecond = upKb * 1024,
-            MedianRttMs = rtt, WorstRttMs = rtt is null ? null : worst ?? rtt, RttConnections = rtt is null ? null : 4
+            LatencyKind = kind ?? (rtt is null ? LatencyKind.None : LatencyKind.Tcp),
+            MedianRttMs = rtt, WorstRttMs = rtt is null ? null : worst ?? rtt, RttConnections = rtt is null ? null : peers
         };
         return Task.FromResult(new AppRatesDto(true, null,
         [
-            Rate("steam", 4120, "Wi-Fi 2", 11.4, 180, rtt: 38, worst: 310),
-            Rate("steamwebhelper", 4188, "Wi-Fi 2", 0.2, 12),
-            Rate("HaloInfinite", 7788, "Ethernet", 0.08, 40, @"G:\SteamLibrary\steamapps\common\Halo Infinite\HaloInfinite.exe", rtt: 14, worst: 16),
-            Rate("Discord", 5021, "Ethernet", 0.02, 8),
+            Rate("steam", 4120, "Wi-Fi 2", 11.4, 180, @"C:\Program Files (x86)\Steam\steam.exe", rtt: 38, worst: 310),
+            Rate("steamwebhelper", 4188, "Wi-Fi 2", 0.2, 12, @"C:\Program Files (x86)\Steam\steam.exe"),
+            // A game over UDP: no TCP to time, so the figure is a ping to its server and says so.
+            Rate("HaloInfinite", 7788, "Ethernet", 0.08, 40, @"G:\SteamLibrary\steamapps\common\Halo Infinite\HaloInfinite.exe", rtt: 14, worst: 16, kind: LatencyKind.PeerProbe, peers: 2),
+            Rate("Discord", 5021, "Ethernet", 0.02, 8, @"C:\Users\Jack\AppData\Local\Discord\Discord.exe"),
+            // Assigned to Gaming (Ethernet) but moving data on Wi-Fi 2, and its servers ignore ping.
+            Rate("ForzaHorizon5", 8120, "Wi-Fi 2", 0.31, 55, @"G:\SteamLibrary\steamapps\common\ForzaHorizon5\ForzaHorizon5.exe", kind: LatencyKind.NotMeasurable),
             Rate("OneDrive", 3300, "Ethernet", 2.6, 90, @"C:\Program Files\Microsoft OneDrive\OneDrive.exe"),
             Rate("brave", 9001, "Wi-Fi 2", 0.4, 20)
         ]));

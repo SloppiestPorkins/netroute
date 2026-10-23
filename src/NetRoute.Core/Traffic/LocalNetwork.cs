@@ -27,17 +27,27 @@ public static class LocalNetwork
         (IPAddress.Parse("ff00::"), 8)
     ];
 
+    // Range bytes are decoded once. Contains() runs for every packet the network meter sees, on
+    // the event thread of a service that stays up for weeks, and decoding nine ranges per call
+    // allocated about ten arrays per packet: garbage collection pauses in the one process that
+    // must not cause jitter.
+    private static readonly (byte[] Network, int Prefix)[] Decoded = Ranges.Select(r => (r.Network.GetAddressBytes(), r.PrefixLength)).ToArray();
+
     public static bool Contains(IPAddress address)
     {
         if (address.IsIPv4MappedToIPv6)
         {
             address = address.MapToIPv4();
         }
-        var bytes = address.GetAddressBytes();
-        foreach (var (network, prefix) in Ranges)
+        Span<byte> bytes = stackalloc byte[16];
+        if (!address.TryWriteBytes(bytes, out var length))
         {
-            var net = network.GetAddressBytes();
-            if (net.Length == bytes.Length && PrefixMatches(bytes, net, prefix))
+            return false;
+        }
+        bytes = bytes[..length];
+        foreach (var (network, prefix) in Decoded)
+        {
+            if (network.Length == length && PrefixMatches(bytes, network, prefix))
             {
                 return true;
             }
@@ -45,7 +55,7 @@ public static class LocalNetwork
         return false;
     }
 
-    private static bool PrefixMatches(byte[] address, byte[] network, int prefix)
+    private static bool PrefixMatches(ReadOnlySpan<byte> address, byte[] network, int prefix)
     {
         var whole = prefix / 8;
         for (var i = 0; i < whole; i++)

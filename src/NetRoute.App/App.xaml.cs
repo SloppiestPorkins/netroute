@@ -60,6 +60,11 @@ public partial class App : Application
         _vm = new MainViewModel(client);
         _window = new MainWindow(_vm, screenshot, Value(args, "--view"));
         MainWindow = _window;
+        if (Value(args, "--size") is { } size && size.Split('x') is [var w, var h] && double.TryParse(w, out var width) && double.TryParse(h, out var height))
+        {
+            _window.Width = width;   // for screenshots of a taller or narrower window than the default
+            _window.Height = height;
+        }
 
         if (screenshot is null)
         {

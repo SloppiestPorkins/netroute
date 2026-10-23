@@ -21,6 +21,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The live view's decisions live in plain files in the WPF project; linked in so they can be tested without a window. -->
+    <Compile Include="..\..\src\NetRoute.App\LiveModel.cs" Link="App\LiveModel.cs" />
+    <Compile Include="..\..\src\NetRoute.App\Format.cs" Link="App\Format.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\NetRoute.Core\NetRoute.Core.csproj" />
     <ProjectReference Include="..\..\src\NetRoute.Windows\NetRoute.Windows.csproj" />
     <ProjectReference Include="..\..\src\NetRoute.Ipc\NetRoute.Ipc.csproj" />

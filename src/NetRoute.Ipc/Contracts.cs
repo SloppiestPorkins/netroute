@@ -268,8 +268,10 @@ public sealed record SystemDownloadsDto(bool Enabled, bool Active, string Summar
 
 /// <summary>
 /// How fast one program is moving data through one network, measured by the service.
-/// The latency fields are TCP round-trip times over the same network; null means not measured
-/// (no data yet, or the machine can't provide it), never zero.
+/// The latency fields say how long a round trip takes over the same network, and
+/// <see cref="LatencyKind"/> says how that was measured: the program's own TCP connections, or a
+/// ping to the far end of its UDP traffic (a different measurement, which the GUI labels as such).
+/// Null means not measured (no data yet, or the machine can't provide it), never zero.
 /// </summary>
 public sealed record AppRateDto
 {
@@ -282,13 +284,16 @@ public sealed record AppRateDto
     public required double DownBytesPerSecond { get; init; }
     public required double UpBytesPerSecond { get; init; }
 
-    /// <summary>Median round trip across this process's TCP connections on this network, in milliseconds.</summary>
+    /// <summary>How <see cref="MedianRttMs"/> was obtained. <see cref="LatencyKind.NotMeasurable"/> means it was tried and could not be (typically a game server that ignores ping).</summary>
+    public LatencyKind LatencyKind { get; init; }
+
+    /// <summary>Median round trip across this process's TCP connections (or answering UDP peers) on this network, in milliseconds.</summary>
     public int? MedianRttMs { get; init; }
 
     /// <summary>The slowest of those connections' latest round trips. Equals the median when only one was measured.</summary>
     public int? WorstRttMs { get; init; }
 
-    /// <summary>How many connections the two figures above come from.</summary>
+    /// <summary>How many connections (TCP) or peers (UDP probe) the two figures above come from.</summary>
     public int? RttConnections { get; init; }
 }
 

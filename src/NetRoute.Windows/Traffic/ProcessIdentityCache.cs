@@ -10,32 +10,48 @@ namespace NetRoute.Windows.Traffic;
 /// <para>Cached per process lifetime and keyed with the process's creation time. Without the
 /// creation time, a PID that Windows reused for a different program would inherit the old
 /// program's identity, and its traffic would be counted against the wrong rule.</para>
+///
+/// <para>The creation time is re-read only every <see cref="RecheckEvery"/> per process. This is
+/// asked for every active process every second, and opening a process handle for each one on that
+/// cadence, for ever, is a standing cost to learn something that changes only when a PID is
+/// reused, which Windows does not do within seconds. Processes that can't be opened (protected
+/// ones) are remembered as unknown for the same interval rather than retried every second.</para>
 /// </summary>
 public sealed class ProcessIdentityCache
 {
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
     private const int ERROR_INSUFFICIENT_BUFFER = 122;
 
+    public static readonly TimeSpan RecheckEvery = TimeSpan.FromSeconds(30);
+
     private readonly Dictionary<int, Entry> _cache = [];
 
-    private sealed record Entry(long Created, string? Path, string? PackageFamilyName);
+    private sealed record Entry(long Created, string? Path, string? PackageFamilyName, long CheckedAt);
 
     public (string? Path, string? PackageFamilyName) Get(int pid)
     {
+        var tick = Environment.TickCount64;
+        if (_cache.TryGetValue(pid, out var known) && tick - known.CheckedAt < RecheckEvery.TotalMilliseconds)
+        {
+            return (known.Path, known.PackageFamilyName);
+        }
+
         using var process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
         if (process.IsInvalid)
         {
             // Protected processes can't be opened; nothing is known about them.
+            _cache[pid] = new Entry(0, null, null, tick);
             return (null, null);
         }
 
         GetProcessTimes(process, out var created, out _, out _, out _);
-        if (_cache.TryGetValue(pid, out var cached) && cached.Created == created)
+        if (known is not null && known.Created == created)
         {
-            return (cached.Path, cached.PackageFamilyName);
+            _cache[pid] = known with { CheckedAt = tick };
+            return (known.Path, known.PackageFamilyName);
         }
 
-        var entry = new Entry(created, ImagePath(process), PackageFamily(process));
+        var entry = new Entry(created, ImagePath(process), PackageFamily(process), tick);
         _cache[pid] = entry;
         return (entry.Path, entry.PackageFamilyName);
     }

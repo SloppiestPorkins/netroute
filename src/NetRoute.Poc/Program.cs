@@ -22,6 +22,10 @@ internal static class Program
         {
             case "wfp":
                 return await WfpProof.RunAsync();
+            case "wfp-or":
+                return await WfpOrProof.RunAsync();
+            case "wfp-measure":
+                return WfpMeasureProof.Run(args.ElementAtOrDefault(1) switch { "collapse" => true, "split" => false, _ => null });
             case "apps":
                 return await AppDiscoveryProof.RunAsync();
             case "split":

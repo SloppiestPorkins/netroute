@@ -40,8 +40,15 @@ public partial class MainWindow : Window
             }
         };
         // Poll quickly while visible, gently from the tray.
-        IsVisibleChanged += (_, _) => _poll.Interval = TimeSpan.FromSeconds(IsVisible ? 2 : 10);
+        IsVisibleChanged += (_, _) => SyncVisibility();
+        StateChanged += (_, _) => SyncVisibility();
         _poll.Tick += async (_, _) => await _vm.RefreshAsync();
+    }
+
+    private void SyncVisibility()
+    {
+        _poll.Interval = TimeSpan.FromSeconds(IsVisible ? 2 : 10);
+        _vm.LiveActive = IsVisible && WindowState != WindowState.Minimized;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)

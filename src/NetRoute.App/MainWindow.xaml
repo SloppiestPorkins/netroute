@@ -120,7 +120,7 @@
                 </Grid.RowDefinitions>
                 <TextBlock Text="What's using each network" Style="{StaticResource H2}" />
                 <TextBlock Grid.Row="1" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16"
-                           Text="Live connections and speeds, refreshed every 2 seconds. Traffic that stays inside your PC isn't shown." />
+                           Text="Every app on the network it is really using, refreshed every 2 seconds. Speeds are smoothed. Traffic that stays inside your PC isn't shown." />
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock Text="{Binding Empty}" Style="{StaticResource Caption}" Visibility="{Binding Empty, Converter={StaticResource NullVisibility}}" />
@@ -144,10 +144,14 @@
                                                         <DockPanel>
                                                             <TextBlock DockPanel.Dock="Right" Text="{Binding Rate}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="14,0,0,0" />
                                                             <TextBlock DockPanel.Dock="Right" Text="{Binding Latency}" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,14,0"
-                                                                       ToolTip="Round-trip time of this app's internet connections on this network"
+                                                                       ToolTip="{Binding LatencyTip}"
                                                                        Visibility="{Binding Latency, Converter={StaticResource NullVisibility}}" />
                                                             <TextBlock DockPanel.Dock="Right" Text="{Binding Detail}" Style="{StaticResource Caption}" VerticalAlignment="Center" Margin="0,0,14,0" />
-                                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                            <StackPanel>
+                                                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                                <TextBlock Text="{Binding Warning}" Foreground="{StaticResource BadBrush}" FontSize="12" FontWeight="SemiBold"
+                                                                           Visibility="{Binding Warning, Converter={StaticResource NullVisibility}}" />
+                                                            </StackPanel>
                                                         </DockPanel>
                                                     </Border>
                                                 </DataTemplate>
@@ -790,8 +794,9 @@
                     <ItemsControl ItemsSource="{Binding Apps}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                <Border Background="{Binding CardFill}" BorderBrush="{Binding CardBrush}" BorderThickness="1"
                                         CornerRadius="10" Padding="14,12" Margin="0,0,0,8">
+                                    <StackPanel>
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -806,7 +811,8 @@
                                         </Border>
                                         <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding Summary}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0" />
+                                            <TextBlock Text="{Binding Summary}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"
+                                                       Visibility="{Binding ShowSummary, Converter={StaticResource BoolVisibility}}" />
                                         </StackPanel>
                                         <Button Grid.Column="2" Style="{StaticResource PillButton}" Background="{Binding RoleTint}" Foreground="{Binding RoleBrush}"
                                                 ToolTip="Change network" VerticalAlignment="Center"
@@ -840,6 +846,23 @@
                                             </Button>
                                         </StackPanel>
                                     </Grid>
+
+                                    <!-- Live: where this app really is, how fast, how laggy. Rows stay when idle. -->
+                                    <WrapPanel Margin="52,10,0,0" Visibility="{Binding HasLive, Converter={StaticResource BoolVisibility}}">
+                                        <Border Style="{StaticResource Pill}" Background="{Binding PlaceTint}" HorizontalAlignment="Left" Padding="10,4" Margin="0,0,16,0">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Style="{StaticResource Icon}" Text="{Binding PlaceGlyph}" FontSize="12" Foreground="{Binding PlaceBrush}" Margin="0,0,7,0" />
+                                                <TextBlock Text="{Binding PlaceText}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Border>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding RateText}" FontSize="13" Foreground="{Binding RateBrush}" ToolTip="Speed over the last few seconds, smoothed" />
+                                            <TextBlock Text="{Binding LatencyText}" FontSize="13" Foreground="{Binding LatencyBrush}" Margin="16,0,0,0"
+                                                       ToolTip="{Binding LatencyTip}" Visibility="{Binding LatencyText, Converter={StaticResource NullVisibility}}" />
+                                            <TextBlock Text="{Binding ConnectionText}" Style="{StaticResource Caption}" FontSize="13" Margin="16,0,0,0" />
+                                        </StackPanel>
+                                    </WrapPanel>
+                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
