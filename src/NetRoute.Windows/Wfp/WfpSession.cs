@@ -20,6 +20,13 @@ public sealed class WfpSession : IDisposable
     private IntPtr _engine;
     private bool _disposed;
 
+    /// <summary>
+    /// How long the last <see cref="InTransaction"/> spent in FwpmTransactionCommit0. The commit is
+    /// where the engine takes its lock and swaps the filter set in, so it is the part that could
+    /// stall other traffic, and the service logs it to be able to say whether it ever did.
+    /// </summary>
+    public TimeSpan LastCommitDuration { get; private set; }
+
     private WfpSession(IntPtr engine) => _engine = engine;
 
     public IntPtr Handle => _engine;
@@ -152,7 +159,10 @@ public sealed class WfpSession : IDisposable
             throw;
         }
 
-        WfpException.ThrowIfFailed("FwpmTransactionCommit0", FwpmTransactionCommit0(_engine));
+        var commit = System.Diagnostics.Stopwatch.StartNew();
+        var committed = FwpmTransactionCommit0(_engine);
+        LastCommitDuration = commit.Elapsed;
+        WfpException.ThrowIfFailed("FwpmTransactionCommit0", committed);
     }
 
     public void Dispose()

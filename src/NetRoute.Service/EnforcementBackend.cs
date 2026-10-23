@@ -9,6 +9,12 @@ public sealed record RuleEnforcementFailure(Guid RuleId, Exception Error);
 
 public sealed record BackendApplyResult(IReadOnlyList<RuleEnforcementFailure> Failures, string? SystemDownloadsError = null)
 {
+    /// <summary>What the apply did to the filter engine, for the log. Zero from a backend that doesn't measure.</summary>
+    public int FiltersRemoved { get; init; }
+    public int FiltersAdded { get; init; }
+    public TimeSpan Elapsed { get; init; }
+    public TimeSpan CommitTime { get; init; }
+
     public static BackendApplyResult Success { get; } = new([]);
 }
 
@@ -72,7 +78,13 @@ public sealed class WfpEnforcementBackend : IEnforcementBackend
     {
         var result = _enforcer.Apply(plan);
         return new(result.Failed.Select(f => new RuleEnforcementFailure(f.Enforcement.Rule.Id, f.Error)).ToList(),
-            result.SystemDownloadsError?.FriendlyMessage);
+            result.SystemDownloadsError?.FriendlyMessage)
+        {
+            FiltersRemoved = result.FiltersRemoved,
+            FiltersAdded = result.FiltersAdded,
+            Elapsed = result.Elapsed,
+            CommitTime = result.CommitTime
+        };
     }
 
     public string? ApplyRedirect(RedirectPlan plan)

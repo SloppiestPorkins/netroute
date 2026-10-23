@@ -22,24 +22,44 @@ public sealed class NoConnectionHistory : IConnectionHistory
 /// here already shows what is connected right now — this keeps the recent past as well, so
 /// "what did that app talk to while I was away" has an answer. Names come from reverse DNS,
 /// looked up once per address in the background and cached, because a list of raw IPv6 addresses
-/// tells nobody anything.</para>
+/// tells nobody anything. The cache is capped, only a few lookups run at once, and a failed one is
+/// not asked again for a while, so a dead resolver costs a trickle of timeouts rather than a flood.</para>
 ///
 /// <para>It lives in memory and starts empty when the service restarts: it is a window on what is
 /// happening, not a log to be kept, and nothing about it leaves the machine.</para>
 /// </summary>
-public sealed class ConnectionHistory(IConnectionSource connections, ILogger<ConnectionHistory> logger)
+public sealed class ConnectionHistory(
+    IConnectionSource connections,
+    ILogger<ConnectionHistory> logger,
+    Func<IPAddress, CancellationToken, Task<string>>? resolve = null,
+    TimeProvider? time = null)
     : BackgroundService, IConnectionHistory
 {
     private const int Keep = 300;
+    private const int KeepNames = 1000;
+    private const int MaxLookups = 4;
 
+    /// <summary>How long a failed lookup is believed before it is tried again.</summary>
+    public static readonly TimeSpan FailureTtl = TimeSpan.FromMinutes(15);
+
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Func<IPAddress, CancellationToken, Task<string>> _resolve =
+        resolve ?? (async (address, ct) => (await Dns.GetHostEntryAsync(address.ToString(), ct)).HostName);
     private readonly ConcurrentDictionary<(string App, string Address), Entry> _seen = new();
-    private readonly ConcurrentDictionary<string, string?> _names = new();
+    private readonly ConcurrentDictionary<string, NameEntry> _names = new();
+    private int _lookupsInFlight;
+
+    /// <summary>An empty name means no answer; Pending marks a lookup under way.</summary>
+    private sealed record NameEntry(string Name, DateTimeOffset At, bool Pending = false);
 
     private sealed record Entry(string App, string Address, string? Adapter, TransportProtocol Protocol, DateTimeOffset First)
     {
         public DateTimeOffset Last { get; set; }
         public int Count { get; set; }
     }
+
+    /// <summary>How many addresses have a remembered answer, for tests and diagnostics.</summary>
+    public int CachedNames => _names.Count;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -57,7 +77,7 @@ public sealed class ConnectionHistory(IConnectionSource connections, ILogger<Con
         }
     }
 
-    private void Record()
+    public void Record()
     {
         var now = DateTimeOffset.Now;
         foreach (var connection in connections.GetConnections())
@@ -82,33 +102,69 @@ public sealed class ConnectionHistory(IConnectionSource connections, ILogger<Con
                 _seen.TryRemove(old.Key, out _);
             }
         }
+        TrimNames();
     }
 
-    /// <summary>Looks a name up once per address, in the background, and remembers the answer.</summary>
+    /// <summary>
+    /// Names are kept per address and addresses come and go, so without this the cache only grows.
+    /// Addresses no longer in the window go first, then the oldest answers.
+    /// </summary>
+    private void TrimNames()
+    {
+        if (_names.Count <= KeepNames)
+        {
+            return;
+        }
+        var shown = _seen.Keys.Select(k => k.Address).ToHashSet();
+        var doomed = _names
+            .Where(n => !n.Value.Pending)
+            .OrderBy(n => shown.Contains(n.Key))
+            .ThenBy(n => n.Value.At)
+            .Take(_names.Count - KeepNames);
+        foreach (var name in doomed.ToList())
+        {
+            _names.TryRemove(name.Key, out _);
+        }
+    }
+
+    /// <summary>
+    /// Looks a name up once per address, in the background, and remembers the answer. Past the
+    /// lookup limit an address is simply left alone until a later pass, rather than queued.
+    /// </summary>
     private void Name(IPAddress address)
     {
         var key = address.ToString();
-        if (_names.ContainsKey(key))
+        var now = _time.GetUtcNow();
+        if (_names.TryGetValue(key, out var known) && (known.Name.Length > 0 || known.Pending || now - known.At < FailureTtl))
         {
             return;
         }
         if (LocalNetwork.Contains(address))
         {
-            _names[key] = "your network";
+            _names[key] = new("your network", now);
             return;
         }
-        _names[key] = null;   // claim it, so only one lookup happens
+        if (Interlocked.Increment(ref _lookupsInFlight) > MaxLookups)
+        {
+            Interlocked.Decrement(ref _lookupsInFlight);
+            return;
+        }
+        _names[key] = new(string.Empty, now, Pending: true);   // claim it, so only one lookup happens
         _ = Task.Run(async () =>
         {
             try
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var entry = await Dns.GetHostEntryAsync(key, timeout.Token);
-                _names[key] = entry.HostName;
+                _names[key] = new(await _resolve(address, timeout.Token), _time.GetUtcNow());
             }
             catch (Exception)
             {
-                _names[key] = "";   // no name; don't ask again
+                // No name. Kept with its time, so a dead resolver is asked again only after the TTL.
+                _names[key] = new(string.Empty, _time.GetUtcNow());
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _lookupsInFlight);
             }
         });
     }
@@ -119,7 +175,7 @@ public sealed class ConnectionHistory(IConnectionSource connections, ILogger<Con
             .Take(Math.Clamp(limit, 1, Keep))
             .Select(e => new ConnectionHistoryDto(
                 e.App,
-                _names.GetValueOrDefault(e.Address) is { Length: > 0 } name ? name : e.Address,
+                _names.TryGetValue(e.Address, out var known) && known.Name.Length > 0 ? known.Name : e.Address,
                 e.Address,
                 e.Adapter,
                 e.Protocol,

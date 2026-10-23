@@ -53,6 +53,13 @@ public sealed class ProcessNetworkMeter(IAdapterSource adapters) : IDisposable
 
     public bool Running => _session is not null && Problem is null;
 
+    /// <summary>
+    /// Which adapter each local address belongs to, as of the last reading. Lets other
+    /// per-connection measurements be tied to the same adapters the rates are grouped by,
+    /// using the same address normalisation, rather than rediscovering adapters a second time.
+    /// </summary>
+    public IReadOnlyDictionary<IPAddress, NetworkAdapter> LocalAddresses => _local;
+
     /// <summary>Why metering isn't running, in words for the user; null while it is.</summary>
     public string? Problem { get; private set; } = "Not started.";
 

@@ -350,37 +350,22 @@ static async Task<int> RemoveAsync(INetRouteClient client, string query)
 static AppStatusDto? SingleApp(ServiceStatusDto status, string query)
 {
     // An exact name wins, so "Minecraft" still works when "Minecraft Launcher" is also in the list.
-    var matches = status.Apps.Where(a => a.Rule.App.DisplayName.Equals(query, StringComparison.OrdinalIgnoreCase)).ToList();
-    if (matches.Count == 0)
+    // After that: part of a name, then part of the program's path (two rules can share a name and
+    // differ only by program, like XboxPcApp.exe and XboxPcAppFT.exe), then the package name.
+    var result = AppQuery.Resolve(status.Apps, a => a.Rule.App, query);
+    if (result.Single is { } only)
     {
-        matches = status.Apps.Where(a => a.Rule.App.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+        return only;
     }
-    if (matches.Count > 1)
+    if (result.Matches.Count == 0)
     {
-        // Two rules can share a display name and differ only by which program they point at:
-        // the Xbox app registers XboxPcApp.exe and XboxPcAppFT.exe, both called "Xbox App".
-        // Matching the path as well means there is always a way to name the one you mean.
-        var byPath = status.Apps
-            .Where(a => Identifier(a).Contains(query, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (byPath.Count == 1)
-        {
-            return byPath[0];
-        }
-    }
-    if (matches.Count == 1)
-    {
-        return matches[0];
-    }
-    if (matches.Count == 0)
-    {
-        Console.Error.WriteLine($"No app in your list matches '{query}'.");
+        Console.Error.WriteLine($"No app in your list matches '{query}'. You can type part of its name or part of its path.");
         return null;
     }
 
     // Say what would tell them apart, rather than printing the same name twice.
     Console.Error.WriteLine($"'{query}' matches several apps. Use enough of one of these to pick one:");
-    foreach (var match in matches)
+    foreach (var match in result.Matches)
     {
         Console.Error.WriteLine($"  {match.Rule.App.DisplayName}  ({Identifier(match)})");
     }
@@ -449,7 +434,9 @@ static void PrintStatus(ServiceStatusDto status)
 {
     Console.WriteLine(status.EnforcementPaused
         ? status.PausedUntil is { } until ? $"Enforcement: paused until {until.ToLocalTime():HH:mm}" : "Enforcement: paused"
-        : status.EnforcementActive ? "Enforcement: active" : "Enforcement: unavailable");
+        : status.EnforcementActive
+            ? status.Headline() is { } headline ? $"Enforcement: active, {headline}" : "Enforcement: active"
+            : "Enforcement: unavailable");
     if (status.Update is { } update) Console.WriteLine($"Update: NetRoute {update.Version} is available - {update.Url}");
     if (status.SystemDownloads is { } system) Console.WriteLine($"Windows downloads: {system.Summary}");
     if (status.DownloadsPause is { } pause && (pause.Enabled || pause.QuietHours is not null))
@@ -460,7 +447,16 @@ static void PrintStatus(ServiceStatusDto status)
               + (pause.Enabled ? " while a game is running" : "")
               + (pause.QuietHours is { } window ? $"{(pause.Enabled ? ", and" : "")} between {window}" : "") + ".");
     }
-    if (status.LastError is { } error) Console.WriteLine($"Problem: {error.FriendlyMessage}");
+    if (status.Summary() is { } failures)
+    {
+        Console.WriteLine($"Problem: {failures}");
+        foreach (var failed in status.Failed())
+        {
+            Console.WriteLine($"  {failed.Rule.App.DisplayName}: {failed.Error!.FriendlyMessage}");
+            if (failed.Error.TechnicalDetail is { } detail) Console.WriteLine($"    {detail}");
+        }
+    }
+    else if (status.LastError is { } error) Console.WriteLine($"Problem: {error.FriendlyMessage}");
     if (status.RedirectSummary is { } redirect) Console.WriteLine($"Moving apps: {redirect}");
     if (status.RouteTie is { } tie) Console.WriteLine($"Problem: {tie.Message} Run 'netroute fix-routes' to fix it.");
     PrintRoles(status.Roles);

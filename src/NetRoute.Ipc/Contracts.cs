@@ -154,7 +154,10 @@ public sealed record ServiceStatusDto
     public required int ProtocolVersion { get; init; }
     public required bool SetupCompleted { get; init; }
 
-    /// <summary>Filters are installed and being maintained.</summary>
+    /// <summary>
+    /// The enforcement backend is available and not paused. Individual rules can still have failed
+    /// to install; see <see cref="AppStatusDto.Error"/> and <c>RuleFailures</c>.
+    /// </summary>
     public required bool EnforcementActive { get; init; }
 
     public required bool EnforcementPaused { get; init; }
@@ -263,7 +266,11 @@ public sealed record SetUpdateSettingsRequest(string? FeedUrl, bool Automatic);
 /// <param name="Summary">One sentence for the user.</param>
 public sealed record SystemDownloadsDto(bool Enabled, bool Active, string Summary);
 
-/// <summary>How fast one program is moving data through one network, measured by the service.</summary>
+/// <summary>
+/// How fast one program is moving data through one network, measured by the service.
+/// The latency fields are TCP round-trip times over the same network; null means not measured
+/// (no data yet, or the machine can't provide it), never zero.
+/// </summary>
 public sealed record AppRateDto
 {
     public required int ProcessId { get; init; }
@@ -274,6 +281,15 @@ public sealed record AppRateDto
     public string? InterfaceName { get; init; }
     public required double DownBytesPerSecond { get; init; }
     public required double UpBytesPerSecond { get; init; }
+
+    /// <summary>Median round trip across this process's TCP connections on this network, in milliseconds.</summary>
+    public int? MedianRttMs { get; init; }
+
+    /// <summary>The slowest of those connections' latest round trips. Equals the median when only one was measured.</summary>
+    public int? WorstRttMs { get; init; }
+
+    /// <summary>How many connections the two figures above come from.</summary>
+    public int? RttConnections { get; init; }
 }
 
 /// <param name="Available">False when the service couldn't start measuring; <paramref name="Problem"/> says why.</param>

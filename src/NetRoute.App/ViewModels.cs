@@ -156,6 +156,11 @@ public partial class MainViewModel : ObservableObject
         {
             SetOverall("Needs attention", "WarnBrush", "WarnTintBrush");
         }
+        else if (status.Headline() is { } headline)
+        {
+            // Said as a count: the other rules are installed and working, so this is not "off".
+            SetOverall(headline, "WarnBrush", "WarnTintBrush");
+        }
         else if (apps.Any(a => a.Verification is VerificationState.Leak))
         {
             SetOverall("Leak detected", "BadBrush", "BadTintBrush");
@@ -170,7 +175,11 @@ public partial class MainViewModel : ObservableObject
         }
 
         var banners = new List<string>();
-        if (status.LastError is { } error)
+        if (status.Summary() is { } failures)
+        {
+            banners.Add(failures + " Open Check-up for which ones.");
+        }
+        else if (status.LastError is { } error)
         {
             banners.Add(error.FriendlyMessage);
         }
@@ -191,7 +200,7 @@ public partial class MainViewModel : ObservableObject
 
         // The problems the service already knows about. Check-up finds more when opened.
         var issues = (status.EnforcementPaused ? 1 : 0) + (status.RouteTie is null ? 0 : 1) + (status.RedirectionAvailable ? 0 : 1)
-                     + status.Roles.Count(r => r.Health != RoleHealth.Connected);
+                     + status.Roles.Count(r => r.Health != RoleHealth.Connected) + (status.Failed().Count > 0 ? 1 : 0);
         CheckupText = issues > 0 ? $"Check-up · {issues}" : "Check-up";
 
         SyncRoles(status.Roles);
@@ -1210,7 +1219,11 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
                     {
                         var mine = sockets.Where(c => Same(c.ProcessName, name)).ToList();
                         var rate = moving.Where(r => Same(r.ProcessName, name)).ToList();
-                        return new LiveItem(name, Detail(mine), mine.Count, rate.Sum(r => r.DownBytesPerSecond), rate.Sum(r => r.UpBytesPerSecond));
+
+                        // Only rows the service actually measured count; an app with none shows no latency at all.
+                        var latency = RttSummary.Combine(rate.Where(r => r.MedianRttMs is not null)
+                            .Select(r => new RttSummary(r.MedianRttMs!.Value, r.WorstRttMs ?? r.MedianRttMs.Value, Math.Max(1, r.RttConnections ?? 1))));
+                        return new LiveItem(name, Detail(mine), mine.Count, rate.Sum(r => r.DownBytesPerSecond), rate.Sum(r => r.UpBytesPerSecond), latency?.Describe());
                     })
                     .OrderByDescending(i => i.Down + i.Up)
                     .ThenByDescending(i => i.Count)
@@ -1259,7 +1272,8 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
 
 public sealed record LiveGroup(string Title, string Subtitle, Brush Accent, string Glyph, IReadOnlyList<LiveItem> Items, string? More, int Total, double Speed);
 
-public sealed record LiveItem(string Name, string Detail, int Count, double Down, double Up)
+/// <param name="Latency">TCP round trip, as text; null when not measured, so nothing is shown rather than "0 ms".</param>
+public sealed record LiveItem(string Name, string Detail, int Count, double Down, double Up, string? Latency = null)
 {
     public string Rate => Down + Up >= 1 ? $"↓ {Format.Rate(Down)}   ↑ {Format.Rate(Up)}" : "";
 }

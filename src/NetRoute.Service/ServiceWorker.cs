@@ -4,8 +4,7 @@ namespace NetRoute.Service;
 
 public sealed class ServiceWorker(NetRouteEngine engine, NamedPipeServer server, ILogger<ServiceWorker> logger) : BackgroundService
 {
-    private readonly SemaphoreSlim _signal = new(0, 1);
-    private DateTimeOffset _lastNetworkSignal;
+    private readonly WakeSignal _signal = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -17,12 +16,9 @@ public sealed class ServiceWorker(NetRouteEngine engine, NamedPipeServer server,
             var pipe = server.RunAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
-                var delay = Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
-                var signaled = _signal.WaitAsync(stoppingToken);
-                await Task.WhenAny(delay, signaled);
-                if (signaled.IsCompletedSuccessfully)
+                if (await _signal.WaitAsync(TimeSpan.FromSeconds(10), stoppingToken))
                 {
-                    var remaining = TimeSpan.FromSeconds(1.5) - (DateTimeOffset.UtcNow - _lastNetworkSignal);
+                    var remaining = TimeSpan.FromSeconds(1.5) - (DateTimeOffset.UtcNow - _signal.LastRaised);
                     if (remaining > TimeSpan.Zero) await Task.Delay(remaining, stoppingToken);
                 }
                 await ReconcileSafely(stoppingToken);
@@ -39,7 +35,7 @@ public sealed class ServiceWorker(NetRouteEngine engine, NamedPipeServer server,
 
     private void OnNetworkChanged(object? sender, EventArgs e) => Signal();
     private void OnAvailabilityChanged(object? sender, NetworkAvailabilityEventArgs e) => Signal();
-    private void Signal() { _lastNetworkSignal = DateTimeOffset.UtcNow; if (_signal.CurrentCount == 0) _signal.Release(); }
+    private void Signal() => _signal.Raise();
     private async Task ReconcileSafely(CancellationToken ct)
     {
         try { await engine.ReconcileAsync(ct); }

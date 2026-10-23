@@ -64,6 +64,13 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
                 "Resume", () => main.Run(() => client.SetEnforcementPausedAsync(false), "Protection is back on.")));
         }
 
+        if (status.Failed() is { Count: > 0 } failed)
+        {
+            // One item for all of them: they usually share a cause (an app that moved or updated).
+            items.Add(HealthItem.Problem(status.Headline()!,
+                status.Summary() + " " + string.Join(" ", failed.Select(f => $"{f.Rule.App.DisplayName}: {f.Error!.FriendlyMessage}"))));
+        }
+
         if (status.RouteTie is { } tie)
         {
             items.Add(HealthItem.Problem("Windows has two default connections", tie.Message, "Fix it", () => main.FixRouteTieCommand.ExecuteAsync(null)));

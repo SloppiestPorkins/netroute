@@ -293,16 +293,17 @@ public sealed class DemoNetRouteClient : INetRouteClient
 
     public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default)
     {
-        AppRateDto Rate(string name, int pid, string adapter, double downMb, double upKb, string? path = null) => new()
+        AppRateDto Rate(string name, int pid, string adapter, double downMb, double upKb, string? path = null, int? rtt = null, int? worst = null) => new()
         {
             ProcessId = pid, ProcessName = name, ExecutablePath = path, InterfaceName = adapter,
-            DownBytesPerSecond = downMb * 1024 * 1024, UpBytesPerSecond = upKb * 1024
+            DownBytesPerSecond = downMb * 1024 * 1024, UpBytesPerSecond = upKb * 1024,
+            MedianRttMs = rtt, WorstRttMs = rtt is null ? null : worst ?? rtt, RttConnections = rtt is null ? null : 4
         };
         return Task.FromResult(new AppRatesDto(true, null,
         [
-            Rate("steam", 4120, "Wi-Fi 2", 11.4, 180),
+            Rate("steam", 4120, "Wi-Fi 2", 11.4, 180, rtt: 38, worst: 310),
             Rate("steamwebhelper", 4188, "Wi-Fi 2", 0.2, 12),
-            Rate("HaloInfinite", 7788, "Ethernet", 0.08, 40, @"G:\SteamLibrary\steamapps\common\Halo Infinite\HaloInfinite.exe"),
+            Rate("HaloInfinite", 7788, "Ethernet", 0.08, 40, @"G:\SteamLibrary\steamapps\common\Halo Infinite\HaloInfinite.exe", rtt: 14, worst: 16),
             Rate("Discord", 5021, "Ethernet", 0.02, 8),
             Rate("OneDrive", 3300, "Ethernet", 2.6, 90, @"C:\Program Files\Microsoft OneDrive\OneDrive.exe"),
             Rate("brave", 9001, "Wi-Fi 2", 0.4, 20)

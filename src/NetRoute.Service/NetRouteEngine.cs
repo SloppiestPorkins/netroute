@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Logging.Abstractions;
 using NetRoute.Core.Adapters;
 using NetRoute.Core.Config;
 using NetRoute.Core.Policy;
@@ -22,6 +23,22 @@ public sealed class EmptyConnectionSource : IConnectionSource
 public sealed class NoDefaultRoutes : IDefaultRouteSource
 {
     public IReadOnlyList<DefaultRoute> ReadIpv4() => [];
+}
+
+/// <summary>What the download apps are fetching, read from wherever they keep that.</summary>
+public interface IDownloadSource
+{
+    IReadOnlyList<DownloadActivityDto> InProgress();
+}
+
+/// <summary>Steam's own manifests. Slow if a library drive is asleep, so never call it under the gate.</summary>
+public sealed class SteamDownloadSource : IDownloadSource
+{
+    public IReadOnlyList<DownloadActivityDto> InProgress()
+        => NetRoute.Windows.Apps.SteamDownloads.InProgress()
+            .Select(d => new DownloadActivityDto("Steam", d.Game, d.BytesRemaining))
+            .Take(5)
+            .ToList();
 }
 
 public interface IPolicyPlanResolver
@@ -52,13 +69,20 @@ public sealed class NetRouteEngine : IDisposable
     private readonly IUsageHistory _history;
     private readonly IUpdateSource _updates;
     private readonly IConnectionHistory _connectionHistory;
+    private readonly IDownloadSource _downloadSource;
+    private readonly TimeProvider _time;
+    private readonly ILogger<NetRouteEngine> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string? _systemDownloadsError;
     private readonly List<ServiceEventDto> _events = [];
     private Dictionary<RoleId, RoleHealth> _roleHealth = [];
     private Dictionary<Guid, IpcError> _ruleErrors = [];
     private EnforcementPlan? _plan;
-    private string? _fingerprint;
+    private PlanPrint? _applied;
+    private int _failedApplies;
+    private DateTimeOffset _retryAt;
+    private string? _lastGame;
+    private DateTimeOffset _lastGameAt;
     private DateTimeOffset _policyAppliedAt = DateTimeOffset.MinValue;
     private long _nextEventId;
     private IpcError? _lastError;
@@ -77,8 +101,14 @@ public sealed class NetRouteEngine : IDisposable
         SelfTestRunner? selfTest = null,
         IUsageHistory? history = null,
         IUpdateSource? updates = null,
-        IConnectionHistory? connectionHistory = null)
+        IConnectionHistory? connectionHistory = null,
+        IDownloadSource? downloads = null,
+        TimeProvider? time = null,
+        ILogger<NetRouteEngine>? logger = null)
     {
+        _downloadSource = downloads ?? new SteamDownloadSource();
+        _time = time ?? TimeProvider.System;
+        _logger = logger ?? NullLogger<NetRouteEngine>.Instance;
         _updates = updates ?? new NoUpdates();
         _connectionHistory = connectionHistory ?? new NoConnectionHistory();
         _links = links ?? new NoLinkQuality();
@@ -126,7 +156,9 @@ public sealed class NetRouteEngine : IDisposable
             {
                 ProtocolVersion = IpcProtocol.Version,
                 SetupCompleted = config.SetupCompleted,
-                EnforcementActive = _backend.IsAvailable && !config.EnforcementPaused && _ruleErrors.Count == 0,
+                // Rules that failed are reported per rule (Apps[].Error). One stale path must not make
+                // the other rules, which are installed and working, look switched off.
+                EnforcementActive = _backend.IsAvailable && !config.EnforcementPaused,
                 EnforcementPaused = config.EnforcementPaused,
                 PausedUntil = config.EnforcementPaused ? config.PausedUntil : null,
                 SystemDownloads = DescribeSystemDownloads(config),
@@ -233,7 +265,8 @@ public sealed class NetRouteEngine : IDisposable
             _backend.EmergencyDisable();
             var config = _store.Load() with { EnforcementPaused = true, PausedUntil = null };
             _store.Save(config);
-            _fingerprint = null;
+            _applied = null;
+            _failedApplies = 0;
             _redirectSummary = "Off. Emergency Disable restored normal Windows networking.";
             AddEvent(ServiceEventKind.EmergencyDisabled, "Emergency disable", "All NetRoute enforcement was disabled.");
         }
@@ -340,8 +373,26 @@ public sealed class NetRouteEngine : IDisposable
         {
             return $"it is quiet hours ({hours})";
         }
-        return config.PauseDownloadsWhileGaming && GameInPlay(config) is { } game ? $"{game} is running" : null;
+        if (!config.PauseDownloadsWhileGaming)
+        {
+            _lastGame = null;
+            return null;
+        }
+        var now = _time.GetUtcNow();
+        if (GameInPlay(config) is { } game)
+        {
+            _lastGame = game;
+            _lastGameAt = now;
+            return $"{game} is running";
+        }
+
+        // A game's connections come and go (a lobby, a loading screen). Unblocking downloads in
+        // each gap rebuilds every filter and kills the download connections that just opened.
+        return _lastGame is { } recent && now - _lastGameAt < GameGrace ? $"{recent} is running" : null;
     }
+
+    /// <summary>How long after its last connection a game still counts as running.</summary>
+    internal static readonly TimeSpan GameGrace = TimeSpan.FromSeconds(45);
 
     public SelfTestDto GetSelfTest()
         => _selfTest?.State ?? new SelfTestDto(false, null, [], "This build can't run the test.");
@@ -388,29 +439,43 @@ public sealed class NetRouteEngine : IDisposable
         }
     }
 
-    private IReadOnlyList<DownloadActivityDto> _downloading = [];
-    private DateTimeOffset _downloadingAt = DateTimeOffset.MinValue;
+    private volatile IReadOnlyList<DownloadActivityDto> _downloading = [];
+    private long _downloadingAtTicks;
+    private int _downloadRefreshing;
 
-    /// <summary>What the download apps are fetching. Read from disk, so cached for a few seconds.</summary>
+    internal static readonly TimeSpan DownloadsRefresh = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// What the download apps are fetching. Reading Steam's manifests touches every library
+    /// drive, and a sleeping one can stall for seconds, so this only returns the last answer and
+    /// starts a refresh in the background. Status is built under the gate, which reconcile and
+    /// Emergency Disable also need.
+    /// </summary>
     private IReadOnlyList<DownloadActivityDto> Downloading()
     {
-        if (DateTimeOffset.UtcNow - _downloadingAt < TimeSpan.FromSeconds(10))
+        var age = _time.GetUtcNow().UtcTicks - Interlocked.Read(ref _downloadingAtTicks);
+        if (age > DownloadsRefresh.Ticks && Interlocked.CompareExchange(ref _downloadRefreshing, 1, 0) == 0)
         {
-            return _downloading;
+            _ = Task.Run(RefreshDownloading);
         }
+        return _downloading;
+    }
+
+    private void RefreshDownloading()
+    {
         try
         {
-            _downloading = NetRoute.Windows.Apps.SteamDownloads.InProgress()
-                .Select(d => new DownloadActivityDto("Steam", d.Game, d.BytesRemaining))
-                .Take(5)
-                .ToList();
+            _downloading = _downloadSource.InProgress();
         }
         catch (Exception)
         {
             _downloading = [];
         }
-        _downloadingAt = DateTimeOffset.UtcNow;
-        return _downloading;
+        finally
+        {
+            Interlocked.Exchange(ref _downloadingAtTicks, _time.GetUtcNow().UtcTicks);
+            Interlocked.Exchange(ref _downloadRefreshing, 0);
+        }
     }
 
     private RouteTie? FindTie(IReadOnlyList<NetworkAdapter> adapters)
@@ -442,14 +507,35 @@ public sealed class NetRouteEngine : IDisposable
     {
         var plan = _resolver.Resolve(config, WhyDownloadsArePaused(config));
         RecordHealthTransitions(config, plan);
-        var fingerprint = Fingerprint(plan);
-        if (fingerprint != _fingerprint)
+        var print = Fingerprint(plan);
+        var now = _time.GetUtcNow();
+        string? trigger = null;
+        if (_applied is null || print.Hash != _applied.Hash)
+        {
+            trigger = Describe(_applied, print);
+            _failedApplies = 0;
+        }
+        else if (_failedApplies > 0 && now >= _retryAt)
+        {
+            // Same plan, but last time something would not install. A Steam library on a drive
+            // that mounts late, or WindowsApps not yet readable at boot, usually comes good, and
+            // until it does that app is running unfiltered.
+            trigger = $"retry {_failedApplies} after a rule failed to install";
+        }
+
+        if (trigger is not null)
         {
             var result = _backend.Apply(plan);
             _ruleErrors = result.Failures.ToDictionary(f => f.RuleId, f => ToError(f.Error));
             _systemDownloadsError = result.SystemDownloadsError;
             _policyAppliedAt = DateTimeOffset.UtcNow;
-            _fingerprint = fingerprint;
+            _applied = print;
+            _failedApplies = result.Failures.Count > 0 || result.SystemDownloadsError is not null ? _failedApplies + 1 : 0;
+            _retryAt = now + RetryDelay(_failedApplies);
+            if (_backend.IsAvailable)
+            {
+                LogApply(result, trigger, now);
+            }
         }
         _plan = plan;
 
@@ -466,6 +552,52 @@ public sealed class NetRouteEngine : IDisposable
         _lastError = !_backend.IsAvailable
             ? new IpcError { FriendlyMessage = _backend.UnavailableReason ?? "Network policy is unavailable." }
             : _ruleErrors.Values.FirstOrDefault();
+    }
+
+    /// <summary>An apply slower than this is worth a warning: it stalls the app's own traffic while filters swap.</summary>
+    private static readonly TimeSpan SlowApply = TimeSpan.FromSeconds(2);
+
+    /// <summary>The routine line is capped to one a minute so a flapping adapter cannot fill the Event Log.</summary>
+    private static readonly TimeSpan RoutineLogInterval = TimeSpan.FromMinutes(1);
+
+    private DateTimeOffset _routineLoggedAt = DateTimeOffset.MinValue;
+    private int _routineSuppressed;
+
+    /// <summary>
+    /// One line per apply, so a latency spike in the user's apps can be lined up with a commit.
+    /// The Event Log keeps only Warning and above unless configured otherwise, so anything a person
+    /// needs to see (a failure or a slow apply) is logged at Warning and is never rate-limited;
+    /// retries are already backed off. The routine case is Information and rate-limited.
+    /// </summary>
+    private void LogApply(BackendApplyResult result, string trigger, DateTimeOffset now)
+    {
+        const string Format = "Filters applied in {ElapsedMs:F0} ms (commit {CommitMs:F0} ms): {Added} added, {Removed} removed, {Failed} rule(s) failed. Trigger: {Trigger}.";
+        object[] args =
+        [
+            result.Elapsed.TotalMilliseconds, result.CommitTime.TotalMilliseconds,
+            result.FiltersAdded, result.FiltersRemoved, result.Failures.Count, trigger
+        ];
+
+        if (result.Failures.Count > 0 || result.SystemDownloadsError is not null)
+        {
+            _logger.LogWarning(Format + " Some rules were not applied; see the app's Check-up for which.", args);
+        }
+        else if (result.Elapsed >= SlowApply)
+        {
+            _logger.LogWarning(Format + " This apply was slow.", args);
+        }
+        else if (now - _routineLoggedAt >= RoutineLogInterval)
+        {
+            _logger.LogInformation(
+                _routineSuppressed == 0 ? Format : Format + " ({Skipped} earlier apply line(s) not logged.)",
+                _routineSuppressed == 0 ? args : [.. args, _routineSuppressed]);
+            _routineLoggedAt = now;
+            _routineSuppressed = 0;
+        }
+        else
+        {
+            _routineSuppressed++;
+        }
     }
 
     private void RecordHealthTransitions(NetRouteConfig config, EnforcementPlan plan)
@@ -522,18 +654,79 @@ public sealed class NetRouteEngine : IDisposable
         return adapter?.State switch { null => RoleHealth.Missing, AdapterState.Connected => RoleHealth.Connected, AdapterState.NoInternet => RoleHealth.NoInternet, _ => RoleHealth.Offline };
     }
 
-    private static string Fingerprint(EnforcementPlan plan)
+    /// <summary>
+    /// Backs off retrying a plan that would not install: 10 s, 30 s, 2 min, then every 5 min. A
+    /// rule that can never work (a deleted game) must not rebuild ~1500 filters every tick, and
+    /// one that is only late (a drive mounting) should not wait long.
+    /// </summary>
+    internal static TimeSpan RetryDelay(int failedApplies) => failedApplies switch
     {
-        var text = string.Join('\n', plan.Applications.OrderBy(a => a.Rule.Id).Select(a => string.Join('|',
+        <= 1 => TimeSpan.FromSeconds(10),
+        2 => TimeSpan.FromSeconds(30),
+        3 => TimeSpan.FromMinutes(2),
+        _ => TimeSpan.FromMinutes(5)
+    };
+
+    /// <summary>One app's share of the fingerprint, split by cause so a rebuild can say why it happened.</summary>
+    private sealed record AppPrint(string Name, string Program, string Action, bool BlockIpv6, string Adapter, string Settings);
+
+    private sealed record PlanPrint(string Hash, Dictionary<Guid, AppPrint> Apps, string System);
+
+    /// <summary>
+    /// What the filters depend on. They match an application and an interface LUID, so the
+    /// adapter's addresses are deliberately absent: a DHCP renewal or an IPv6 temporary-address
+    /// rotation would otherwise tear down and rebuild every filter for nothing. Whether the
+    /// adapter has IPv6 at all still counts, through BlockIpv6.
+    /// </summary>
+    private static PlanPrint Fingerprint(EnforcementPlan plan)
+    {
+        var apps = plan.Applications.ToDictionary(a => a.Rule.Id, a => new AppPrint(
+            a.Rule.App.DisplayName,
             // The program path is included so an app updating into a new folder (Discord's
             // app-x.y.z) re-applies its filters instead of leaving them on the old file.
-            a.Rule.Id, a.Rule.App.ExecutablePath, a.Action, a.ResolvedAdapter?.Luid, a.ResolvedAdapter?.Ipv4Address, a.ResolvedAdapter?.Ipv6Address,
-            a.BlockIpv6, a.Rule.Mode, a.Rule.KillSwitch, a.Rule.EnforceIpv4, a.Rule.EnforceIpv6,
-            a.Rule.EnforceTcp, a.Rule.EnforceUdp, a.Rule.Paused, a.Rule.IncludeRelatedProcesses)));
-        text += plan.SystemDownloads is { } system
-            ? $"\nsystem|{system.Adapter.Luid}|{system.BlockIpv6}|{string.Join(',', system.Services)}"
-            : "\nsystem|off";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+            a.Rule.App.ExecutablePath ?? string.Empty,
+            a.Action.ToString(),
+            a.BlockIpv6,
+            a.ResolvedAdapter?.Luid.ToString() ?? string.Empty,
+            string.Join('|', a.Rule.Mode, a.Rule.KillSwitch, a.Rule.EnforceIpv4, a.Rule.EnforceIpv6,
+                a.Rule.EnforceTcp, a.Rule.EnforceUdp, a.Rule.Paused, a.Rule.IncludeRelatedProcesses)));
+        var system = plan.SystemDownloads is { } downloads
+            ? $"{downloads.Adapter.Luid}|{downloads.BlockIpv6}|{string.Join(',', downloads.Services)}"
+            : "off";
+        var text = string.Join('\n', apps.OrderBy(a => a.Key).Select(a =>
+            $"{a.Key}|{a.Value.Program}|{a.Value.Action}|{a.Value.Adapter}|{a.Value.BlockIpv6}|{a.Value.Settings}"))
+            + "\nsystem|" + system;
+        return new(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))), apps, system);
+    }
+
+    /// <summary>Why filters are being rebuilt, in plain words for the log: which part of the plan moved.</summary>
+    private static string Describe(PlanPrint? before, PlanPrint after)
+    {
+        if (before is null)
+        {
+            return "first apply since the service started or Emergency Disable";
+        }
+        var changes = new List<string>();
+        foreach (var (id, now) in after.Apps)
+        {
+            if (!before.Apps.TryGetValue(id, out var was))
+            {
+                changes.Add($"{now.Name} added");
+                continue;
+            }
+            if (was.Program != now.Program) changes.Add($"{now.Name} program path changed");
+            if (was.Action != now.Action) changes.Add($"{now.Name} action {was.Action} to {now.Action}");
+            if (was.BlockIpv6 != now.BlockIpv6) changes.Add($"{now.Name} IPv6 blocking {(now.BlockIpv6 ? "on" : "off")}");
+            if (was.Adapter != now.Adapter) changes.Add($"{now.Name} moved to a different adapter");
+            if (was.Settings != now.Settings) changes.Add($"{now.Name} rule settings changed");
+        }
+        changes.AddRange(before.Apps.Where(a => !after.Apps.ContainsKey(a.Key)).Select(a => $"{a.Value.Name} removed"));
+        if (before.System != after.System) changes.Add("system downloads settings changed");
+
+        const int shown = 4;
+        return changes.Count == 0 ? "plan changed"
+            : changes.Count <= shown ? string.Join("; ", changes)
+            : $"{string.Join("; ", changes.Take(shown))}; and {changes.Count - shown} more";
     }
 
     private static NetworkAdapter RequireAdapter(IReadOnlyList<NetworkAdapter> adapters, ulong luid)

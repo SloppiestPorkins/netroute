@@ -51,9 +51,12 @@ public sealed class WfpEnforcer
         var applied = new List<AppliedRule>();
         var failed = new List<FailedRule>();
         WfpException? systemError = null;
+        var removed = 0;
+        var timer = System.Diagnostics.Stopwatch.StartNew();
 
         _session.InTransaction(() =>
         {
+            removed = _installedFilters.Count;
             RemoveAllFilters();
 
             foreach (var app in plan.Applications)
@@ -99,7 +102,13 @@ public sealed class WfpEnforcer
             }
         });
 
-        return new EnforcementResult(applied, failed, systemError);
+        return new EnforcementResult(applied, failed, systemError)
+        {
+            FiltersRemoved = removed,
+            FiltersAdded = _installedFilters.Count,
+            Elapsed = timer.Elapsed,
+            CommitTime = _session.LastCommitDuration
+        };
     }
 
     private static readonly Guid[] V4Layers = [FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4];
@@ -410,6 +419,14 @@ public sealed record EnforcementResult(
     IReadOnlyList<FailedRule> Failed,
     WfpException? SystemDownloadsError = null)
 {
+    /// <summary>What the last apply did to the engine, for the service's log. Zero when not measured.</summary>
+    public int FiltersRemoved { get; init; }
+    public int FiltersAdded { get; init; }
+
+    /// <summary>The whole transaction, and the commit within it.</summary>
+    public TimeSpan Elapsed { get; init; }
+    public TimeSpan CommitTime { get; init; }
+
     public int TotalFilters => Applied.Sum(a => a.FilterCount);
     public bool FullySucceeded => Failed.Count == 0;
 }
