@@ -620,50 +620,62 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!-- Header -->
-            <DockPanel>
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Command="{Binding OpenSelfTestCommand}" Margin="0,0,8,0" ToolTip="Do your two connections work, stay separate, and leave each other alone under a download? This tests your connections, not NetRoute itself.">
+            <!-- Header. A Grid with a wrapping toolbar, not a DockPanel: a horizontal StackPanel
+                 never gives up space, so the status beside the title was simply painted over by
+                 the buttons, and "Leak detected" (the one thing you most need to read) was the
+                 casualty. The buttons now move to a second line instead (24 Oct 2026). -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" MinWidth="0" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="NetRoute" Style="{StaticResource H1}" />
+                    <Border Style="{StaticResource Pill}" Background="{Binding OverallTint}" Margin="14,5,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Fill="{Binding OverallBrush}" VerticalAlignment="Center" />
+                            <!-- Trimmed rather than clipped if it is ever longer than the room for it. -->
+                            <TextBlock Text="{Binding OverallText}" FontWeight="SemiBold" FontSize="13" Margin="7,0,0,0"
+                                       MaxWidth="320" TextTrimming="CharacterEllipsis"
+                                       ToolTip="{Binding OverallText}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <WrapPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Command="{Binding OpenSelfTestCommand}" Margin="8,3,0,3" ToolTip="Do your two connections work, stay separate, and leave each other alone under a download? This tests your connections, not NetRoute itself.">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE768;" Margin="0,0,8,0" />
                             <TextBlock Text="Test connections" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding OpenCheckupCommand}" Margin="0,0,8,0" ToolTip="Check everything that affects where your traffic goes">
+                    <Button Command="{Binding OpenCheckupCommand}" Margin="8,3,0,3" ToolTip="Check everything that affects where your traffic goes">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE9D9;" Margin="0,0,8,0" />
                             <TextBlock Text="{Binding CheckupText}" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding OpenLiveCommand}" Margin="0,0,8,0" ToolTip="See which apps are using each network right now">
+                    <Button Command="{Binding OpenLiveCommand}" Margin="8,3,0,3" ToolTip="See which apps are using each network right now">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE9D2;" Margin="0,0,8,0" />
                             <TextBlock Text="Live use" />
                         </StackPanel>
                     </Button>
-                    <Button Command="{Binding TogglePauseAllCommand}" Margin="0,0,8,0">
+                    <Button Command="{Binding TogglePauseAllCommand}" Margin="8,3,0,3">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE769;" Margin="0,0,8,0" />
                             <TextBlock Text="{Binding PauseText}" />
                         </StackPanel>
                     </Button>
-                    <Button Style="{StaticResource DangerButton}" Command="{Binding EmergencyDisableCommand}">
+                    <Button Style="{StaticResource DangerButton}" Command="{Binding EmergencyDisableCommand}" Margin="8,3,0,3">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE7E8;" Margin="0,0,8,0" />
                             <TextBlock Text="Emergency Disable" />
                         </StackPanel>
                     </Button>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="NetRoute" Style="{StaticResource H1}" />
-                    <Border Style="{StaticResource Pill}" Background="{Binding OverallTint}" Margin="14,5,0,0">
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="8" Height="8" Fill="{Binding OverallBrush}" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding OverallText}" FontWeight="SemiBold" FontSize="13" Margin="7,0,0,0" />
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-            </DockPanel>
+                </WrapPanel>
+            </Grid>
 
             <!-- Banners -->
             <StackPanel Grid.Row="1">

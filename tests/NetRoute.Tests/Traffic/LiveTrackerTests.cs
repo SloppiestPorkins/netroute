@@ -96,9 +96,12 @@ public class LiveTrackerTests
 
         Assert.Equal(PlacementState.Idle, live.Placement.State);
         Assert.False(live.HasTraffic);
-        Assert.Equal("no traffic", live.RateText);
-        Assert.Equal("no connections", live.ConnectionText);
         Assert.StartsWith("Idle", live.Headline);
+
+        // The headline already says it is idle. Repeating that as "no traffic" and then again as
+        // "no connections" gave the row three ways of saying nothing is happening.
+        Assert.Equal("", live.RateText);
+        Assert.Equal("", live.ConnectionText);
     }
 
     [Fact]

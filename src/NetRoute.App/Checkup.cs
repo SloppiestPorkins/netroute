@@ -310,16 +310,24 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             return;
         }
 
+        // Said in two sentences, like every other item here. It used to run to a hundred words
+        // with a hex error code and a PowerShell command buried in the middle of them, and its
+        // button opened Add App -- which does nothing about IPv6 (24 Oct 2026).
+        var command = $"Disable-NetAdapterBinding -Name \"{gaming.Name}\" -ComponentID ms_tcpip6";
         items.Add(HealthItem.Problem($"{gaming.Name} has IPv6 and {downloads.Name} doesn't",
-            $"This one difference causes most of what goes wrong here. Apps without a role use {downloads.Name} for "
-            + $"IPv4 and {gaming.Name} for IPv6 at the same time, which is two ISPs in one session and breaks anything "
-            + "that ties a sign-in to your address. And apps NetRoute does hold on Downloads have their IPv6 blocked, "
-            + "because Downloads has none to offer: that is how Xbox and Store installs fail, with error 0x87E00005. "
-            + $"The cure is to remove the difference. Open {gaming.Name}'s adapter properties and untick Internet "
-            + "Protocol Version 6, or run this as administrator:  Disable-NetAdapterBinding -Name \""
-            + gaming.Name + "\" -ComponentID ms_tcpip6  —  everything then uses IPv4, on whichever connection you "
-            + "chose for it. Xbox multiplayer prefers IPv6 but works without it.",
-            "Add an app", () => main.OpenAddAppAsync()));
+            $"Anything you haven't given a role uses {downloads.Name} for IPv4 and {gaming.Name} for IPv6 at once, "
+            + "which is two providers in one session and breaks anything that ties a sign-in to your address. "
+            + "It is also why Xbox and Store installs fail with error 0x87E00005. "
+            + $"Turning IPv6 off on {gaming.Name} removes the difference: everything then uses IPv4, on whichever "
+            + "connection you chose for it. Xbox multiplayer prefers IPv6 but works without it.",
+            "Copy the fix", () =>
+            {
+                // All this can honestly do is hand over the command: changing an adapter's bindings
+                // needs administrator, and the app runs as you.
+                System.Windows.Clipboard.SetText(command);
+                main.ShowToast("Copied. Paste it into PowerShell as administrator.");
+                return Task.CompletedTask;
+            }));
     }
 
     private async Task AddGamingLineChecks(ServiceStatusDto status, List<HealthItem> items)

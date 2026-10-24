@@ -24,11 +24,14 @@ public sealed record LiveApp(
     LatencyKind LatencyKind,
     bool HasTraffic)
 {
-    public string RateText => HasTraffic ? $"↓ {Format.Rate(Down)}   ↑ {Format.Rate(Up)}" : "no traffic";
+    // An idle app said it three times over: "Idle. Assigned to Downloads (Wi-Fi 2)", then
+    // "no traffic", then "no connections". The placement chip already says it is idle, so these
+    // two have nothing to add until there is something to report (24 Oct 2026).
+    public string RateText => HasTraffic ? $"↓ {Format.Rate(Down)}   ↑ {Format.Rate(Up)}" : "";
 
     public string ConnectionText => Connections switch
     {
-        0 => "no connections",
+        0 => "",
         1 => "1 connection",
         var n => $"{n} connections"
     };
