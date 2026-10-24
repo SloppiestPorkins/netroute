@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Windows.Data;
 using System.Windows;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -49,6 +51,14 @@ public partial class MainViewModel : ObservableObject
     {
         _client = client;
         Setup = new SetupViewModel(this);
+
+        // Grouped once, here, rather than rebuilt per refresh: the view watches the same
+        // collection the rows are updated in place in.
+        AppsByConnection = CollectionViewSource.GetDefaultView(Apps);
+        AppsByConnection.GroupDescriptions.Add(new PropertyGroupDescription(nameof(AppRowViewModel.Group)));
+        // Groups follow the sort, so this is what puts Gaming above Downloads.
+        AppsByConnection.SortDescriptions.Add(new SortDescription(nameof(AppRowViewModel.GroupOrder), ListSortDirection.Ascending));
+        AppsByConnection.SortDescriptions.Add(new SortDescription(nameof(AppRowViewModel.Name), ListSortDirection.Ascending));
         Apps.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoApps));
     }
 
@@ -61,6 +71,16 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private Brush _overallTint = Ui.Res("NeutralTintBrush");
     [ObservableProperty] private string? _banner;
     [ObservableProperty] private string? _routeTieText;
+
+    /// <summary>
+    /// The one thing most worth doing something about, as a single line. These used to be a stack
+    /// of banners, one per problem, each pushing the list further down the window -- and every one
+    /// of them is in Check-up already, with the same fix. The tie keeps its own button because it
+    /// really is one click; everything else sends you to the list of them.
+    /// </summary>
+    [ObservableProperty] private string? _attentionText;
+
+    [ObservableProperty] private string _attentionAction = "Open Check-up";
     [ObservableProperty] private string? _updateText;
     [ObservableProperty] private string _updateAction = "Get it";
     [ObservableProperty] private double _updateFraction;
@@ -113,6 +133,13 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<RoleCardViewModel> Roles { get; } = [];
     public ObservableCollection<AppRowViewModel> Apps { get; } = [];
     public bool HasNoApps => Apps.Count == 0;
+
+    /// <summary>
+    /// The same apps, gathered under the connection each one was assigned to, so the list itself
+    /// answers "what is using what" instead of that living in a separate overlay. The group header
+    /// is the connection's own card, which is why there is no longer a networks section above.
+    /// </summary>
+    public ICollectionView AppsByConnection { get; }
     public SetupViewModel Setup { get; }
 
     internal INetRouteClient Client => _client;
@@ -200,6 +227,23 @@ public partial class MainViewModel : ObservableObject
         }
         Banner = banners.Count == 0 ? null : string.Join("\n", banners);
         RouteTieText = status.RouteTie?.Message;
+
+        // A tie is worth saying in full, because the fix is right there. Anything else is named
+        // and handed to Check-up rather than spelled out over several banners.
+        if (RouteTieText is { } tie)
+        {
+            AttentionText = tie;
+            AttentionAction = "Fix it";
+        }
+        else if (banners.Count > 0)
+        {
+            AttentionText = banners[0] + (banners.Count > 1 ? $" And {banners.Count - 1} more." : "");
+            AttentionAction = "Open Check-up";
+        }
+        else
+        {
+            AttentionText = null;
+        }
         RedirectText = status.RedirectSummary;
         PauseDownloadsWhileGaming = status.DownloadsPause?.Enabled ?? false;
         _update = status.Update;
@@ -366,7 +410,7 @@ public partial class MainViewModel : ObservableObject
             Apps.Clear();
             foreach (var a in ordered)
             {
-                Apps.Add(new AppRowViewModel(a));
+                Apps.Add(new AppRowViewModel(a) { Card = Roles.FirstOrDefault(r => r.Role == a.Rule.Role) });
             }
             return;
         }
@@ -374,6 +418,12 @@ public partial class MainViewModel : ObservableObject
         for (var i = 0; i < ordered.Count; i++)
         {
             Apps[i].Update(ordered[i]);
+        }
+
+        // After Update, because that is what sets each row's group.
+        foreach (var row in Apps)
+        {
+            row.Card = Roles.FirstOrDefault(r => r.Role == row.Group);
         }
     }
 
@@ -492,6 +542,14 @@ public partial class MainViewModel : ObservableObject
 
     [RelayCommand]
     private Task OpenCheckup() => OpenCheckupAsync();
+
+    /// <summary>
+    /// Whatever the one attention line is offering. A default-route tie is fixed on the spot,
+    /// because that genuinely is one click; anything else opens the list of problems rather than
+    /// being spelled out in a banner of its own.
+    /// </summary>
+    [RelayCommand]
+    private Task Attention() => RouteTieText is null ? OpenCheckupAsync() : FixRouteTie();
 
     public async Task OpenCheckupAsync()
     {
@@ -804,6 +862,23 @@ public partial class AppRowViewModel : ObservableObject
     public Guid Id { get; }
     public AppStatusDto Dto { get; private set; } = null!;
 
+    /// <summary>
+    /// Which connection this app is grouped under in the list. Deliberately the one it was
+    /// ASSIGNED to, not the one it is observed on: grouping by observed traffic would make rows
+    /// jump between groups as traffic moved, which is the jitter the live strip was fixed for.
+    /// Being somewhere other than here is what the strip says, in red (24 Oct 2026).
+    /// </summary>
+    [ObservableProperty] private RoleId _group;
+
+    /// <summary>The connection card shown as this row's group header, or null for Windows routing.</summary>
+    [ObservableProperty] private RoleCardViewModel? _card;
+
+    /// <summary>
+    /// Which connection's group comes first. Gaming is what the PC is for, so it leads; apps
+    /// NetRoute is not placing come last, because there is nothing to check about them.
+    /// </summary>
+    public int GroupOrder => Group switch { RoleId.Gaming => 0, RoleId.Downloads => 1, _ => 2 };
+
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private string _glyph = "";
     [ObservableProperty] private Brush _roleBrush = Brushes.Gray;
@@ -904,6 +979,8 @@ public partial class AppRowViewModel : ObservableObject
     {
         Dto = dto;
         var role = dto.Rule.Role;
+        Group = role;
+        OnPropertyChanged(nameof(GroupOrder));
         Name = dto.Rule.App.DisplayName;
         Glyph = Ui.Glyph(role);
         RoleBrush = Ui.RoleBrush(role);

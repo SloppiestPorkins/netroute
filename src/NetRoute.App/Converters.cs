@@ -16,8 +16,14 @@ public sealed class EqualsVisibilityConverter : IValueConverter
 /// <summary>Collapsed for null or empty text, so optional lines take no space.</summary>
 public sealed class NullVisibilityConverter : IValueConverter
 {
+    /// <param name="parameter">"Invert" to show when there is nothing, which is how a group with no
+    /// connection of its own gets a heading in place of the connection card.</param>
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => value is null || value is string { Length: 0 } ? Visibility.Collapsed : Visibility.Visible;
+    {
+        var empty = value is null || value is string { Length: 0 };
+        var invert = parameter is string s && s.Equals("Invert", StringComparison.OrdinalIgnoreCase);
+        return empty != invert ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }
