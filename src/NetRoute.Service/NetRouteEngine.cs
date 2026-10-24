@@ -73,6 +73,14 @@ public sealed class NetRouteEngine : IDisposable
     private readonly TimeProvider _time;
     private readonly ILogger<NetRouteEngine> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    /// <summary>
+    /// Set while Emergency Disable is removing filters, so a reconcile that is already past the
+    /// gate does not install them again the instant it finishes. Read and written without a lock
+    /// on purpose: it only ever suppresses an apply, and the config it saves is what makes the
+    /// pause stick.
+    /// </summary>
+    private volatile bool _emergencyStop;
     private string? _systemDownloadsError;
     private readonly List<ServiceEventDto> _events = [];
     private Dictionary<RoleId, RoleHealth> _roleHealth = [];
@@ -258,11 +266,44 @@ public sealed class NetRouteEngine : IDisposable
 
     public async Task EmergencyDisableAsync(CancellationToken ct = default)
     {
-        await _gate.WaitAsync(ct);
+        // Deliberately not under the gate. This is what someone reaches for when their network is
+        // broken, and the gate is also held across reading config, resolving policy and route-table
+        // work, so waiting for it could mean waiting out a whole reconcile. The backend has its own
+        // lock, so removal still waits for an enforcement call that is genuinely in flight, and
+        // nothing else (24 Oct 2026).
+        //
+        // The flag goes up first so a reconcile that has not reached its apply yet does not start
+        // one. The pause is then recorded, and only then are the filters removed -- so nothing
+        // after the removal has to wait for anything, and the caller is not left hanging on a pipe
+        // while a reconcile finishes.
+        _emergencyStop = true;
+        await PauseForEmergencyAsync(ct);
         try
         {
             // Filter removal must not depend on readable config or a working resolver.
             _backend.EmergencyDisable();
+        }
+        finally
+        {
+            // An apply already inside the backend cannot be called back, so it may reinstall what
+            // was just removed. The saved pause is what fixes that: the next reconcile resolves an
+            // empty plan and takes the filters away again.
+            _emergencyStop = false;
+        }
+    }
+
+    /// <summary>
+    /// Records the pause before removal is attempted, and whether or not it succeeds. Saving it
+    /// only on success meant a failed Emergency Disable was quietly re-applied on the next tick.
+    /// </summary>
+    private async Task PauseForEmergencyAsync(CancellationToken ct)
+    {
+        // A moment for the gate, then on regardless. Holding out for it would reintroduce exactly
+        // the wait this is here to remove, and writing the config without it risks nothing worse
+        // than overwriting a setting someone changed in the same instant.
+        var held = await _gate.WaitAsync(TimeSpan.FromSeconds(1), ct);
+        try
+        {
             var config = _store.Load() with { EnforcementPaused = true, PausedUntil = null };
             _store.Save(config);
             _applied = null;
@@ -270,7 +311,10 @@ public sealed class NetRouteEngine : IDisposable
             _redirectSummary = "Off. Emergency Disable restored normal Windows networking.";
             AddEvent(ServiceEventKind.EmergencyDisabled, "Emergency disable", "All NetRoute enforcement was disabled.");
         }
-        finally { _gate.Release(); }
+        finally
+        {
+            if (held) _gate.Release();
+        }
     }
 
     private SystemDownloadsDto DescribeSystemDownloads(NetRouteConfig config)
@@ -415,6 +459,11 @@ public sealed class NetRouteEngine : IDisposable
             status.RedirectionAvailable,
             status.EnforcementPaused,
             status.Apps.Where(a => a.Verification == VerificationState.Verified)
+                .Select(a => $"{a.Rule.App.DisplayName} on {a.ObservedAdapterName}").ToList(),
+            // Only the Gaming ones, separately: that is the single step of the test that says
+            // anything about NetRoute rather than about the two lines themselves, so it has to be
+            // a Gaming app seen on the Gaming connection or it cannot pass.
+            status.Apps.Where(a => a.Verification == VerificationState.Verified && a.Rule.Role == RoleId.Gaming)
                 .Select(a => $"{a.Rule.App.DisplayName} on {a.ObservedAdapterName}").ToList()));
     }
 
@@ -520,21 +569,38 @@ public sealed class NetRouteEngine : IDisposable
             // Same plan, but last time something would not install. A Steam library on a drive
             // that mounts late, or WindowsApps not yet readable at boot, usually comes good, and
             // until it does that app is running unfiltered.
-            trigger = $"retry {_failedApplies} after a rule failed to install";
+            trigger = _backend.IsAvailable
+                ? $"retry {_failedApplies} after a rule failed to install"
+                : $"retry {_failedApplies} after network policy was unavailable";
         }
 
-        if (trigger is not null)
+        if (trigger is not null && !_emergencyStop)
         {
             var result = _backend.Apply(plan);
             _ruleErrors = result.Failures.ToDictionary(f => f.RuleId, f => ToError(f.Error));
             _systemDownloadsError = result.SystemDownloadsError;
             _policyAppliedAt = DateTimeOffset.UtcNow;
             _applied = print;
-            _failedApplies = result.Failures.Count > 0 || result.SystemDownloadsError is not null ? _failedApplies + 1 : 0;
+            // A backend that could not open WFP (not ready at boot, or another copy enforcing) counts as
+            // a failed apply, so the same backoff that retries a rule retries the backend too.
+            _failedApplies = result.Failures.Count > 0 || result.SystemDownloadsError is not null || !_backend.IsAvailable
+                ? _failedApplies + 1
+                : 0;
             _retryAt = now + RetryDelay(_failedApplies);
             if (_backend.IsAvailable)
             {
+                if (_unavailableLogged is not null)
+                {
+                    _logger.LogWarning("Network policy is available again; enforcement is now on.");
+                    _unavailableLogged = null;
+                }
                 LogApply(result, trigger, now);
+            }
+            else if (_backend.UnavailableReason != _unavailableLogged)
+            {
+                // Once per distinct reason: the retries are backed off, but the line need not repeat.
+                _unavailableLogged = _backend.UnavailableReason;
+                _logger.LogWarning("Network policy is unavailable, so nothing is being enforced: {Reason} Retrying.", _unavailableLogged);
             }
         }
         _plan = plan;
@@ -568,6 +634,7 @@ public sealed class NetRouteEngine : IDisposable
     /// <summary>The routine line is capped to one a minute so a flapping adapter cannot fill the Event Log.</summary>
     private static readonly TimeSpan RoutineLogInterval = TimeSpan.FromMinutes(1);
 
+    private string? _unavailableLogged;
     private DateTimeOffset _routineLoggedAt = DateTimeOffset.MinValue;
     private int _routineSuppressed;
 
@@ -624,7 +691,22 @@ public sealed class NetRouteEngine : IDisposable
                 var binding = config.BindingFor(role);
                 var name = adapters.FirstOrDefault(a => a.Luid == binding?.AdapterLuid)?.Name ?? binding?.LastKnownName ?? "The selected network";
                 if (health != RoleHealth.Connected)
-                    AddEvent(ServiceEventKind.RoleOffline, $"{role.DisplayName()} unavailable", $"{role.DisplayName()} unavailable. {name} is offline. {count} apps are protected by Kill Switch.");
+                {
+                    // Only Strict rules are held. Preferred ones deliberately fall back to Windows
+                    // routing, so counting all of them as blocked would overstate what happened.
+                    var strict = config.AppRules.Count(r => r.Role == role && r.Mode == RoutingMode.Strict && !r.Paused);
+                    var fallsBack = config.AppRules.Count(r => r.Role == role && r.Mode != RoutingMode.Strict && !r.Paused);
+                    var detail = (strict, fallsBack) switch
+                    {
+                        (0, 0) => "No apps are assigned to it.",
+                        (_, 0) => $"{Count(strict, "app")} on Strict {(strict == 1 ? "is" : "are")} blocked until it is back.",
+                        (0, _) => $"{Count(fallsBack, "app")} {(fallsBack == 1 ? "falls" : "fall")} back to Windows routing.",
+                        _ => $"{Count(strict, "app")} on Strict {(strict == 1 ? "is" : "are")} blocked until it is back; " +
+                             $"{Count(fallsBack, "app")} {(fallsBack == 1 ? "falls" : "fall")} back to Windows routing."
+                    };
+                    AddEvent(ServiceEventKind.RoleOffline, $"{role.DisplayName()} unavailable",
+                        $"{role.DisplayName()} unavailable. {name} is offline. {detail}");
+                }
                 else
                     AddEvent(ServiceEventKind.RoleRestored, $"{role.DisplayName()} restored", $"{role.DisplayName()} restored. {name} connected. Traffic restored for {count} apps.");
             }
@@ -700,8 +782,7 @@ public sealed class NetRouteEngine : IDisposable
             a.Action.ToString(),
             a.BlockIpv6,
             a.ResolvedAdapter?.Luid.ToString() ?? string.Empty,
-            string.Join('|', a.Rule.Mode, a.Rule.KillSwitch, a.Rule.EnforceIpv4, a.Rule.EnforceIpv6,
-                a.Rule.EnforceTcp, a.Rule.EnforceUdp, a.Rule.Paused, a.Rule.IncludeRelatedProcesses)));
+            string.Join('|', a.Rule.Mode, a.Rule.EnforceIpv6, a.Rule.Paused)));
         var system = plan.SystemDownloads is { } downloads
             ? $"{downloads.Adapter.Luid}|{downloads.BlockIpv6}|{string.Join(',', downloads.Services)}"
             : "off";
@@ -712,6 +793,8 @@ public sealed class NetRouteEngine : IDisposable
     }
 
     /// <summary>Why filters are being rebuilt, in plain words for the log: which part of the plan moved.</summary>
+    private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
+
     private static string Describe(PlanPrint? before, PlanPrint after)
     {
         if (before is null)

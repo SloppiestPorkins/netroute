@@ -170,17 +170,12 @@ public sealed class PolicyResolver
 
     private static AppEnforcement UnavailableRole(AppRule rule, NetworkAdapter? adapter, List<Reason> reasons)
     {
-        // Strict never silently degrades onto another network — that is the entire
-        // point of the mode, and §15/§39 are explicit that falling back is wrong.
-        if (rule.Mode == RoutingMode.Strict && rule.KillSwitch)
-        {
-            reasons.Add(Reason.Bad("Kill Switch is on, so traffic is blocked rather than sent over another network."));
-            return Plan(rule, EnforcementAction.BlockAll, adapter, true, reasons);
-        }
-
+        // Strict never silently degrades onto another network - that is the entire point of the
+        // mode, and §15/§39 are explicit that falling back is wrong. Strict IS the kill switch;
+        // the only way to get a fall-back is Preferred mode.
         if (rule.Mode == RoutingMode.Strict)
         {
-            reasons.Add(Reason.Bad("Strict mode is on but Kill Switch is off, so traffic is blocked while the network is down."));
+            reasons.Add(Reason.Bad("Strict mode is on, so this app is blocked rather than sent over another network."));
             return Plan(rule, EnforcementAction.BlockAll, adapter, true, reasons);
         }
 

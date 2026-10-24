@@ -77,7 +77,7 @@ public sealed class WfpEnforcer
         WfpException? systemError = null;
         foreach (var group in groups.Where(g => g.Error is not null && g.App is not null))
         {
-            failed.Add(new FailedRule(group.App!, group.Error!));
+            failed.Add(new FailedRule(group.App!, NotProtected(group.App!, group.Error!)));
         }
 
         // Work on a copy: the real state moves only if the transaction commits.
@@ -152,7 +152,7 @@ public sealed class WfpEnforcer
                         rolledBack.Add(group.Owner);
                         if (group.App is { } app)
                         {
-                            failed.Add(new FailedRule(app, ex));
+                            failed.Add(new FailedRule(app, NotProtected(app, ex)));
                         }
                         else if (group.IsSystemDownloads)
                         {
@@ -189,16 +189,48 @@ public sealed class WfpEnforcer
     }
 
     /// <summary>
+    /// A rule with no filters installed enforces nothing, so say that, rather than only that something failed.
+    /// The engine retries with backoff, and the message says so.
+    /// </summary>
+    private static WfpException NotProtected(AppEnforcement app, WfpException error)
+        => error.WithConsequence(app.Action == EnforcementAction.BlockAll
+            ? "This app is NOT being blocked right now: none of its filters are installed. NetRoute will keep retrying."
+            : "This app is NOT protected right now: none of its filters are installed, so nothing keeps it off the wrong network. NetRoute will keep retrying.");
+
+    /// <summary>Why the last <see cref="EmergencyDisable"/> could not list NetRoute's filters in the engine, or null if it could.</summary>
+    public WfpException? LastEnumerationError { get; private set; }
+
+    /// <summary>
     /// Removes every NetRoute filter, restoring normal Windows networking (§43).
+    ///
+    /// <para>What is removed is what this enforcer remembers plus every filter the engine lists under
+    /// NetRoute's provider key, so filters an earlier apply committed but this object lost track of
+    /// (an exception between commit and bookkeeping) are not skipped. If the engine cannot be
+    /// listed, the remembered filters are still removed and the reason is kept in
+    /// <see cref="LastEnumerationError"/>; failing to look must not stop an emergency disable.</para>
     /// </summary>
     public void EmergencyDisable()
     {
-        if (_installed.Count == 0)
+        var ids = new HashSet<ulong>(_installed.Values.SelectMany(o => o.Values));
+        LastEnumerationError = null;
+        try
         {
+            foreach (var id in _store.EnumerateOwned())
+            {
+                ids.Add(id);
+            }
+        }
+        catch (WfpException ex)
+        {
+            LastEnumerationError = ex;
+        }
+
+        if (ids.Count == 0)
+        {
+            _installed = [];
             return;
         }
 
-        var ids = _installed.Values.SelectMany(o => o.Values).ToList();
         _store.InTransaction(() =>
         {
             foreach (var id in ids)

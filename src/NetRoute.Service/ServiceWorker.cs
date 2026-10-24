@@ -8,6 +8,8 @@ public sealed class ServiceWorker(NetRouteEngine engine, NamedPipeServer server,
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Let the host report Running (and the pipe come up) before the first, possibly slow, apply.
+        await Task.Yield();
         NetworkChange.NetworkAddressChanged += OnNetworkChanged;
         NetworkChange.NetworkAvailabilityChanged += OnAvailabilityChanged;
         try
@@ -39,6 +41,7 @@ public sealed class ServiceWorker(NetRouteEngine engine, NamedPipeServer server,
     private async Task ReconcileSafely(CancellationToken ct)
     {
         try { await engine.ReconcileAsync(ct); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }   // a stop is not a failure
         catch (Exception ex) { logger.LogError(ex, "Policy reconciliation failed"); }
     }
 }

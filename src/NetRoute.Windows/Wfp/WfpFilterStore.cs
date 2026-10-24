@@ -18,6 +18,12 @@ internal interface IFilterStore
     /// <summary>Removes one filter. One that has already gone is not an error.</summary>
     void Delete(ulong id);
 
+    /// <summary>
+    /// The ids of every filter in the engine filed under this store's provider, including any the
+    /// enforcer has lost track of. A store that cannot tell returns nothing.
+    /// </summary>
+    IReadOnlyList<ulong> EnumerateOwned() => [];
+
     /// <summary>How long the last transaction spent in its commit.</summary>
     TimeSpan LastCommitDuration { get; }
 }
@@ -28,6 +34,8 @@ internal sealed class WfpFilterStore(WfpSession session) : IFilterStore
     public TimeSpan LastCommitDuration => session.LastCommitDuration;
 
     public void InTransaction(Action action) => session.InTransaction(action);
+
+    public IReadOnlyList<ulong> EnumerateOwned() => session.EnumerateFilterIds(session.Identity.ProviderKey);
 
     public void Delete(ulong id)
     {
@@ -47,7 +55,7 @@ internal sealed class WfpFilterStore(WfpSession session) : IFilterStore
         using var scope = new ConditionScope();
         try
         {
-            Marshal.StructureToPtr(WfpSession.ProviderKey, providerKeyPtr, false);
+            Marshal.StructureToPtr(session.Identity.ProviderKey, providerKeyPtr, false);
 
             var conditions = spec.Conditions.Select(c => Build(scope, c)).ToList();
             var filter = new FWPM_FILTER0
@@ -56,7 +64,7 @@ internal sealed class WfpFilterStore(WfpSession session) : IFilterStore
                 displayData = new FWPM_DISPLAY_DATA0 { name = spec.Name, description = "NetRoute policy" },
                 providerKey = providerKeyPtr,
                 layerKey = spec.Layer,
-                subLayerKey = WfpSession.SubLayerKey,
+                subLayerKey = session.Identity.SubLayerKey,
 
                 // UINT8 weights are stored inline and give 16 relative levels within the
                 // sublayer, which is ample here and avoids managing a pinned UINT64.

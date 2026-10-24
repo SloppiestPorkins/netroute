@@ -173,12 +173,9 @@ internal static class FilterPlanner
 
         var luid = app.ResolvedAdapter!.Luid;
 
-        if (rule.EnforceIpv4)
+        foreach (var layer in V4Layers)
         {
-            foreach (var layer in V4Layers)
-            {
-                AddPinned(filters, layer, identity, rule, luid, loopbackLuid);
-            }
+            AddPinned(filters, layer, identity, rule, luid, loopbackLuid);
         }
 
         if (rule.EnforceIpv6)
@@ -212,7 +209,7 @@ internal static class FilterPlanner
 
         filters.Add(new FilterSpec(layer, FWP_ACTION_PERMIT, WeightRolePermit,
             $"{name}: permit on {rule.Role.DisplayName()}",
-            [.. identity, new LocalInterfaceCondition(luid), .. ProtocolConditions(rule)]));
+            [.. identity, new LocalInterfaceCondition(luid)]));
 
         // Without this, blocking "everything except the role interface" would also cut
         // 127.0.0.1. Launchers, overlays and anti-cheat components talk to each other
@@ -229,16 +226,12 @@ internal static class FilterPlanner
     }
 
     private static FilterSpec Block(Guid layer, ConditionSpec[] identity, AppRule rule, string name)
-        => new(layer, FWP_ACTION_BLOCK, WeightCatchAllBlock, name, [.. identity, .. ProtocolConditions(rule)]);
+        => new(layer, FWP_ACTION_BLOCK, WeightCatchAllBlock, name, identity);
 
-    /// <summary>
-    /// Protocol conditions, but only when the rule actually narrows the protocol. A rule that
-    /// covers both TCP and UDP needs no protocol condition at all.
-    /// </summary>
-    private static List<ConditionSpec> ProtocolConditions(AppRule rule)
-        => rule.EnforceTcp == rule.EnforceUdp
-            ? []
-            : [new ProtocolCondition((byte)(rule.EnforceTcp ? IPPROTO_TCP : IPPROTO_UDP))];
+    // A rule has never narrowed the protocol -- there is no UI or CLI for it -- so there was never
+    // a protocol condition to add. The per-protocol settings are gone (24 Oct 2026); if one comes
+    // back, note that conditions on the same field within one filter are not ANDed, so TCP and UDP
+    // as two equality conditions would not mean "either".
 
     /// <summary>
     /// Keeps Windows' download services on Downloads: the same permit-there, block-elsewhere

@@ -7,21 +7,33 @@ using NetRoute.Windows.Traffic;
 namespace NetRoute.Service;
 
 /// <summary>What the test needs to know, gathered by the engine before the test starts.</summary>
+/// <param name="VerifiedApps">Every app currently reported as seen on its assigned connection, whatever its role.</param>
+/// <param name="GamingVerifiedApps">
+/// The same, restricted to apps assigned to Gaming: the only ones NetRoute actually moves (Downloads
+/// apps are held where Windows already puts them). Null from an engine that doesn't supply it,
+/// in which case the "moved" step cannot tell the two apart and says so instead of passing.
+/// </param>
 public sealed record SelfTestInput(
     NetworkAdapter? Gaming,
     NetworkAdapter? Downloads,
     bool RedirectionAvailable,
     bool EnforcementPaused,
-    IReadOnlyList<string> VerifiedApps);
+    IReadOnlyList<string> VerifiedApps,
+    IReadOnlyList<string>? GamingVerifiedApps = null);
 
 /// <summary>
-/// "Prove it": the test every split-tunnelling guide says to run and almost no tool runs for you.
+/// The connection test: do your two connections work, are they really separate lines, and does a
+/// download on one leave the other's latency alone (bufferbloat, the mechanism behind "my ping
+/// spikes when Steam downloads").
 ///
-/// <para>It answers the only questions that matter, with evidence rather than configuration:
-/// does each connection reach the internet, do they come out on different lines, are apps really
-/// being moved, and — the point of the whole product — does a download on Downloads leave the
-/// gaming line's latency alone. That last one is bufferbloat, the actual mechanism behind "my
-/// ping spikes when Steam downloads", measured here rather than asserted.</para>
+/// <para><b>What it does NOT establish, and the wording says so.</b> Steps 1, 2 and 4 bind sockets
+/// from this service to each adapter's address. A socket bound that way leaves by that adapter
+/// whether or not NetRoute is installed, so those steps measure the two ISPs, not NetRoute, and
+/// would read the same with enforcement dead. They are described as exactly that. Only step 3
+/// looks at NetRoute's effect, and only through what the traffic observer has already seen real
+/// Gaming apps doing. Proving NetRoute's own placement end to end needs a separate probe process
+/// under a real rule; that is what <c>NetRoute.Poc split</c> does, and it is not something a
+/// background service can honestly fake with its own sockets.</para>
 ///
 /// <para>It makes real internet requests (api.ipify.org to see each line's public address, and
 /// Cloudflare's speed-test endpoint for load), so it only ever runs when the user asks.</para>
@@ -63,8 +75,8 @@ public sealed class SelfTestRunner(ILogger<SelfTestRunner> logger)
             [
                 new SelfTestStepDto("Each connection reaches the internet", SelfTestState.Pending, null),
                 new SelfTestStepDto("They are separate lines", SelfTestState.Pending, null),
-                new SelfTestStepDto("Apps are being moved", SelfTestState.Pending, null),
-                new SelfTestStepDto("A download doesn't slow your gaming line", SelfTestState.Pending, null)
+                new SelfTestStepDto("A Gaming app is seen on the Gaming connection", SelfTestState.Pending, null),
+                new SelfTestStepDto("A download on one connection leaves the other alone", SelfTestState.Pending, null)
             ], "Testing. This takes about half a minute.");
             _run = Task.Run(() => RunAsync(input));
             return _state;
@@ -89,16 +101,11 @@ public sealed class SelfTestRunner(ILogger<SelfTestRunner> logger)
         {
             lock (_gate)
             {
-                var steps = _state.Steps;
-                var failed = steps.Count(s => s.State == SelfTestState.Fail);
-                var warned = steps.Count(s => s.State == SelfTestState.Warn);
                 _state = _state with
                 {
                     Running = false,
                     FinishedAt = DateTimeOffset.Now,
-                    Summary = failed > 0 ? "Something isn't working. The failed steps say what."
-                        : warned > 0 ? "Working, with notes. The amber steps explain."
-                        : "Everything checks out."
+                    Summary = Summarise(_state.Steps)
                 };
             }
         }
@@ -143,30 +150,60 @@ public sealed class SelfTestRunner(ILogger<SelfTestRunner> logger)
         }
         Update(1, gaming == downloads ? SelfTestState.Warn : SelfTestState.Pass,
             gaming == downloads
-                ? $"Both come out of {gaming}, so they share one uplink. NetRoute still keeps the apps apart, but they compete for the same line."
-                : $"Different public addresses ({gaming} and {downloads}), so these really are two separate lines.");
+                ? $"Both come out of {gaming}, so they share one uplink. NetRoute can still keep apps on one connection or the other, but they compete for the same line."
+                : $"Different public addresses ({gaming} and {downloads}), so these really are two separate lines. " +
+                  "That is a fact about your two internet providers, not something NetRoute does.");
     }
 
-    /// <summary>Step 3: is anything actually being moved right now.</summary>
+    /// <summary>Step 3: has a Gaming app actually been seen on the Gaming connection.</summary>
     private void Moving(int step, SelfTestInput input)
+    {
+        var (state, text) = JudgeMoving(input);
+        Update(step, state, text);
+    }
+
+    /// <summary>
+    /// The only step that depends on NetRoute, so it is the only one that can fail because NetRoute
+    /// isn't working. It passes on a Gaming app seen on its assigned connection, never on a
+    /// Downloads app: those are held where Windows already sends them, which proves nothing about
+    /// NetRoute moving anything.
+    /// </summary>
+    public static (SelfTestState State, string Text) JudgeMoving(SelfTestInput input)
     {
         if (input.EnforcementPaused)
         {
-            Update(step, SelfTestState.Warn, "Protection is paused, so nothing is being moved or kept in place.");
-            return;
+            return (SelfTestState.Warn, "Protection is paused, so NetRoute isn't placing any app. There is nothing to check.");
         }
         if (!input.RedirectionAvailable)
         {
-            Update(step, SelfTestState.Fail, "The split-tunnel driver isn't running, so NetRoute can't move apps onto Gaming.");
-            return;
+            return (SelfTestState.Fail, "The split-tunnel driver isn't running, so NetRoute can't move apps onto Gaming.");
         }
-        Update(step, input.VerifiedApps.Count > 0 ? SelfTestState.Pass : SelfTestState.Warn,
-            input.VerifiedApps.Count > 0
-                ? "Verified from real traffic: " + string.Join(", ", input.VerifiedApps.Take(6)) + "."
-                : "The driver is ready, but no app has sent traffic yet, so there's nothing to verify. Start a game or a download and run this again.");
+        if (input.GamingVerifiedApps is null)
+        {
+            // An engine that can't say which apps are Gaming apps: refuse to pass on the strength of Downloads apps.
+            return input.VerifiedApps.Count > 0
+                ? (SelfTestState.Warn, "These apps were seen on their assigned connection: " + string.Join(", ", input.VerifiedApps.Take(6)) +
+                   ". That list can include Downloads apps, which are held in place rather than moved, so it doesn't show an app being moved.")
+                : (SelfTestState.Warn, "No app has been seen on its assigned connection yet. Start a game and run this again.");
+        }
+        return input.GamingVerifiedApps.Count > 0
+            ? (SelfTestState.Pass, "Seen on the Gaming connection, as assigned: " + string.Join(", ", input.GamingVerifiedApps.Take(6)) +
+               ". This is the one check here that depends on NetRoute.")
+            : (SelfTestState.Warn, "No Gaming app has been seen using the Gaming connection yet, so nothing shows NetRoute moving an app. " +
+               "Start a game and run this again.");
     }
 
-    /// <summary>Step 4: the whole point — a download on Downloads must not cost the gaming line its latency.</summary>
+    public static string Summarise(IReadOnlyList<SelfTestStepDto> steps)
+    {
+        var failed = steps.Count(s => s.State == SelfTestState.Fail);
+        var warned = steps.Count(s => s.State == SelfTestState.Warn);
+        return failed > 0 ? "Something isn't working. The failed steps say what."
+            : warned > 0 ? "Working, with notes. The amber steps explain."
+            : "Your two connections work and stay apart under load. Only the third check looks at NetRoute itself; " +
+              "the others measure your connections and would read the same without it.";
+    }
+
+    /// <summary>Step 4: does a download on Downloads cost the gaming line its latency. Measured with this test's own sockets.</summary>
     private async Task UnderLoad(int step, SelfTestInput input)
     {
         if (input.Gaming?.Ipv4Address is not { } gaming || input.Downloads?.Ipv4Address is not { } downloads)
@@ -208,8 +245,9 @@ public sealed class SelfTestRunner(ILogger<SelfTestRunner> logger)
         {
             Update(step, SelfTestState.Pass,
                 $"{input.Gaming.Name} stayed at {after} ms (worst {worst} ms; {before} ms when idle) while " +
-                $"{input.Downloads.Name} pulled {speed:0.0} MB/s. That's the separation working: a download on one " +
-                "connection can't take the other one's latency.");
+                $"{input.Downloads.Name} pulled {speed:0.0} MB/s. A download on one of these connections doesn't take " +
+                "the other one's latency. That is how the two lines behave on their own (this test uses its own connections, " +
+                "so it would read the same without NetRoute); NetRoute's job is keeping your apps on the right one.");
             return;
         }
         Update(step, SelfTestState.Warn, sameLine

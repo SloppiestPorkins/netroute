@@ -195,6 +195,11 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
         {
             return null;
         }
+        if (update.State is UpdateState.Ready && !StillMatches(update))
+        {
+            // The file was changed or removed since it was checked: forget it and fetch again.
+            Available = update = update with { State = UpdateState.Available, ReadyPath = null, Fraction = 0 };
+        }
         if (update.State is UpdateState.Ready or UpdateState.Downloading)
         {
             return update;
@@ -232,8 +237,7 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
         var part = target + ".part";
         try
         {
-            Directory.CreateDirectory(Folder);
-            Protect(Folder);
+            UpdateFolderGuard.Prepare(Folder);
 
             using var http = Http();
             using var response = await http.GetAsync(update.Url, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -287,6 +291,13 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
         {
             Available = update;   // the service is stopping; nothing to say
         }
+        catch (UpdateFolderException ex)
+        {
+            // The installer is run elevated, so a folder we cannot lock down is a refusal, not a shrug.
+            logger.LogError(ex, "The update folder cannot be made safe, so nothing was downloaded.");
+            Available = Failed(update.Version, update.Url,
+                "NetRoute couldn't make its update folder safe, so it didn't download the update. Use the link instead. " + ex.Message);
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Downloading the update failed.");
@@ -333,32 +344,14 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
         return Convert.ToHexString(SHA256.HashData(stream));
     }
 
-    /// <summary>
-    /// Only SYSTEM and administrators may write here. The file is an installer that will be run
-    /// elevated, so a standard account being able to swap it would hand that account the machine.
-    /// </summary>
-    private static void Protect(string folder)
+    private static bool StillMatches(UpdateDto update)
     {
         try
         {
-            var info = new DirectoryInfo(folder);
-            var security = info.GetAccessControl();
-            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-            foreach (var sid in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid })
-            {
-                security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null),
-                    FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                    PropagationFlags.None, AccessControlType.Allow));
-            }
-            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
-                FileSystemRights.ReadAndExecute, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                PropagationFlags.None, AccessControlType.Allow));
-            info.SetAccessControl(security);
+            return update.ReadyPath is { } path && update.Sha256 is { Length: > 0 } sha
+                && File.Exists(path) && Hash(path).Equals(sha, StringComparison.OrdinalIgnoreCase);
         }
-        catch (Exception)
-        {
-            // Inherited permissions from %ProgramData% still keep standard users out of SYSTEM's files.
-        }
+        catch (IOException) { return false; }
     }
 
     /// <summary>Keeps the one installer that is current; older ones are megabytes doing nothing.</summary>
@@ -381,4 +374,110 @@ public sealed class Updater(ILogger<Updater> logger) : BackgroundService, IUpdat
             // Not worth failing an update over.
         }
     }
+}
+
+public sealed class UpdateFolderException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>
+/// Makes the folder an elevated installer is fetched into safe, or says it cannot.
+///
+/// <para>ProgramData lets any user create a folder, so a standard user could pre-create
+/// <c>updates</c> (or turn it into a junction) and own it, and then swap the installer after the
+/// hash check. So: a folder that is a reparse point or is owned by anyone but SYSTEM or
+/// Administrators is deleted and recreated; the DACL is then set to SYSTEM and Administrators
+/// full, Users read-only; and the result is read back and checked. Any step that fails throws
+/// <see cref="UpdateFolderException"/>; nothing is swallowed.</para>
+/// </summary>
+public static class UpdateFolderGuard
+{
+    private const FileSystemRights WriteLike = FileSystemRights.WriteData | FileSystemRights.AppendData
+        | FileSystemRights.WriteExtendedAttributes | FileSystemRights.WriteAttributes | FileSystemRights.Delete
+        | FileSystemRights.DeleteSubdirectoriesAndFiles | FileSystemRights.ChangePermissions | FileSystemRights.TakeOwnership;
+
+    private static bool IsTrustedByDefault(SecurityIdentifier sid)
+        => sid.IsWellKnown(WellKnownSidType.LocalSystemSid) || sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid);
+
+    /// <param name="trusted">Who may own the folder; tests widen it, the service uses the default.</param>
+    public static void Prepare(string folder, Func<SecurityIdentifier, bool>? trusted = null)
+    {
+        trusted ??= IsTrustedByDefault;
+        try
+        {
+            var parent = Path.GetDirectoryName(folder) ?? throw new UpdateFolderException("The update folder has no parent folder.");
+            Directory.CreateDirectory(parent);
+            RequireTrustedOwner(new DirectoryInfo(parent), trusted, "its parent folder");
+
+            var info = new DirectoryInfo(folder);
+            if (info.Exists)
+            {
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    Directory.Delete(folder, recursive: false);   // removes the link, never follows it
+                }
+                else if (!trusted(Owner(info)))
+                {
+                    Directory.Delete(folder, recursive: true);
+                }
+            }
+
+            Directory.CreateDirectory(folder);
+            info = new DirectoryInfo(folder);
+            Lock(info);
+            Verify(info, trusted);
+        }
+        catch (UpdateFolderException) { throw; }
+        catch (Exception ex)
+        {
+            throw new UpdateFolderException($"The update folder could not be secured: {ex.Message}", ex);
+        }
+    }
+
+    private static void Lock(DirectoryInfo info)
+    {
+        var security = info.GetAccessControl();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>().ToList())
+        {
+            security.RemoveAccessRuleSpecific(rule);
+        }
+        foreach (var sid in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid })
+        {
+            security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid, null),
+                FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+        }
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null),
+            FileSystemRights.ReadAndExecute, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow));
+        info.SetAccessControl(security);
+    }
+
+    /// <summary>Reads the folder's real state back: trusted owner, not a link, nobody untrusted can write.</summary>
+    public static void Verify(DirectoryInfo info, Func<SecurityIdentifier, bool>? trusted = null)
+    {
+        trusted ??= IsTrustedByDefault;
+        info.Refresh();
+        if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+            throw new UpdateFolderException("The update folder is a link, not a real folder.");
+        RequireTrustedOwner(info, trusted, "the update folder");
+        var security = info.GetAccessControl();
+        foreach (var rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>())
+        {
+            if (rule.AccessControlType != AccessControlType.Allow || (rule.FileSystemRights & WriteLike) == 0) continue;
+            var who = (SecurityIdentifier)rule.IdentityReference;
+            if (!IsTrustedByDefault(who) && !trusted(who) && !who.IsWellKnown(WellKnownSidType.CreatorOwnerSid))
+                throw new UpdateFolderException($"The update folder lets {who.Value} change files in it.");
+        }
+    }
+
+    private static void RequireTrustedOwner(DirectoryInfo info, Func<SecurityIdentifier, bool> trusted, string what)
+    {
+        var owner = Owner(info);
+        if (!trusted(owner))
+            throw new UpdateFolderException($"{what} is owned by {owner.Value}, not by SYSTEM or Administrators.");
+    }
+
+    private static SecurityIdentifier Owner(DirectoryInfo info)
+        => (SecurityIdentifier?)info.GetAccessControl().GetOwner(typeof(SecurityIdentifier))
+           ?? throw new UpdateFolderException("The owner of the update folder could not be read.");
 }

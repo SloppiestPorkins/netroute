@@ -144,7 +144,7 @@ public class LiveTrackerTests
 
         var notEnforced = One(new LiveTracker(), Game(action: EnforcementAction.None, role: RoleId.Default), Rates(Rate("Wi-Fi 2", 300_000)), 0);
         Assert.False(notEnforced.Placement.IsProblem);
-        Assert.Contains("Windows decides", notEnforced.Headline);
+        Assert.Contains("Not placed by NetRoute", notEnforced.Headline);
     }
 
     [Fact]

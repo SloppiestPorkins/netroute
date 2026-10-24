@@ -16,10 +16,20 @@ namespace NetRoute.Core.Policy;
 /// <item>apps assigned to Gaming are the split set, moved onto the Gaming adapter.</item>
 /// </list>
 /// <para>A game Steam launches is split by its own program file, not by Steam's.</para>
+///
+/// <para>This is a deliberate, visible change to Windows: while any app is assigned to Gaming,
+/// everything NOT in a rule (a new browser, Discord, Spotify, name lookups) follows the Downloads
+/// line, because that is Windows' default route. The "Default" choice therefore means "Windows
+/// routing, which NetRoute points at Downloads", and the UI and README say exactly that. With no
+/// Gaming app there is nothing to split, so Windows' metrics are left (or put back) alone.</para>
 /// </summary>
 public sealed record RedirectPlan
 {
-    /// <summary>Make <see cref="Downloads"/> win Windows' IPv4 default route over <see cref="Gaming"/>.</summary>
+    /// <summary>
+    /// Make <see cref="Downloads"/> win Windows' IPv4 default route over <see cref="Gaming"/>. Only
+    /// true while at least one app is assigned to Gaming: that is the one case where the split
+    /// needs Downloads to be the default. Without it Windows keeps choosing for itself.
+    /// </summary>
     public required bool ManageDefaultRoute { get; init; }
 
     /// <summary>Engage the driver for <see cref="SplitRules"/>.</summary>
@@ -63,6 +73,14 @@ public static class RedirectPlanner
             return Off("Gaming and Downloads are the same connection.");
         }
 
+        // Only a Gaming app needs the split, and so only a Gaming app needs Downloads to be the
+        // default route. A paused or never-moved (local-hosting) Gaming app doesn't count.
+        var wantsSplit = plan.Applications.Any(a => a.Rule.Role == RoleId.Gaming && a.Action != EnforcementAction.None);
+        if (!wantsSplit)
+        {
+            return Off("No apps are assigned to Gaming, so NetRoute isn't changing Windows' routing.");
+        }
+
         // From here the routing preference holds even while one side is briefly offline, so
         // an unplugged cable doesn't flip Windows' default connection back and forth.
         var baseline = new RedirectPlan { ManageDefaultRoute = true, Split = false, Downloads = downloads, Gaming = gaming };
@@ -73,7 +91,7 @@ public static class RedirectPlanner
         }
         if (gaming.State != AdapterState.Connected || gaming.Ipv4Address is null)
         {
-            // Strict Gaming apps are held by the kill switch's WFP filters meanwhile (§39).
+            // Strict Gaming apps are held by their block filters meanwhile (§39).
             return baseline with { Reason = $"{gaming.Name} isn't connected." };
         }
 
@@ -83,7 +101,7 @@ public static class RedirectPlanner
             .ToList();
 
         return rules.Count == 0
-            ? baseline with { Reason = "No apps are assigned to Gaming yet." }
+            ? baseline with { Reason = "No Gaming app can be moved right now." }
             : baseline with { Split = true, SplitRules = rules };
     }
 

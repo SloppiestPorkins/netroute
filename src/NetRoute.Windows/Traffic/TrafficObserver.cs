@@ -39,7 +39,7 @@ public sealed class TrafficObserver(IAdapterSource adapters)
 {
     private readonly ProcessIdentityCache _processes = new();
     private readonly object _gate = new();
-    private Dictionary<string, DateTimeOffset> _firstSeen = [];
+    private Dictionary<(TransportProtocol, IPEndPoint, IPEndPoint?, int), DateTimeOffset> _firstSeen = [];
     private bool _primed;
     private IReadOnlyList<ObservedConnection>? _last;
     private DateTimeOffset _lastAt;
@@ -66,7 +66,7 @@ public sealed class TrafficObserver(IAdapterSource adapters)
                 }
             }
 
-            var seen = new Dictionary<string, DateTimeOffset>();
+            var seen = new Dictionary<(TransportProtocol, IPEndPoint, IPEndPoint?, int), DateTimeOffset>();
             var result = new List<ObservedConnection>();
             foreach (var socket in ConnectionTable.Snapshot())
             {
@@ -83,7 +83,7 @@ public sealed class TrafficObserver(IAdapterSource adapters)
                     byAddress.TryGetValue(local, out adapter);
                 }
 
-                var key = $"{socket.Protocol}|{socket.Local}|{socket.Remote}|{socket.ProcessId}";
+                var key = (socket.Protocol, socket.Local, socket.Remote, socket.ProcessId);   // no per-socket strings
                 var first = _firstSeen.TryGetValue(key, out var known) ? known : _primed ? now : DateTimeOffset.MinValue;
                 seen[key] = first;
 

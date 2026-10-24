@@ -1,12 +1,17 @@
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using NetRoute.Core.Policy;
 
 namespace NetRoute.Ipc;
 
-public sealed class NamedPipeNetRouteClient(string? pipeName = null) : INetRouteClient, IDisposable
+/// <param name="verifyServer">Check that whoever owns the pipe is SYSTEM or Administrators before
+/// sending anything. Null means yes for the real pipe name and no for a custom one (tests).</param>
+public sealed class NamedPipeNetRouteClient(string? pipeName = null, bool? verifyServer = null) : INetRouteClient, IDisposable
 {
     private readonly string _pipeName = pipeName ?? IpcProtocol.PipeName;
+    private readonly bool _verify = verifyServer ?? pipeName is null;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private NamedPipeClientStream? _pipe;
     private IpcConnection? _connection;
@@ -77,8 +82,30 @@ public sealed class NamedPipeNetRouteClient(string? pipeName = null) : INetRoute
         timeout.CancelAfter(TimeSpan.FromSeconds(1));
         try { await _pipe.ConnectAsync(timeout.Token); }
         catch (OperationCanceledException ex) when (!ct.IsCancellationRequested) { throw new TimeoutException("Pipe connection timed out.", ex); }
+        if (_verify && !IsTrustedServer(_pipe))
+        {
+            Disconnect();
+            throw new ServiceUnavailableException("Something other than the NetRoute service is answering on its pipe, so NetRoute did not talk to it.");
+        }
         _connection = new IpcConnection(_pipe);
     }
+
+    /// <summary>
+    /// The service is LocalSystem, so its pipe is owned by Administrators or SYSTEM. A pipe made by a
+    /// standard user (the only way to squat the name while the service is down) is owned by that
+    /// user. Unreadable owner fails closed.
+    /// </summary>
+    private static bool IsTrustedServer(NamedPipeClientStream pipe)
+    {
+        try
+        {
+            return pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) is SecurityIdentifier owner && IsTrustedOwner(owner);
+        }
+        catch (Exception) { return false; }
+    }
+
+    public static bool IsTrustedOwner(SecurityIdentifier owner)
+        => owner.IsWellKnown(WellKnownSidType.LocalSystemSid) || owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid);
 
     private void Disconnect() { _connection?.Dispose(); _connection = null; _pipe = null; }
     public void Dispose() { Disconnect(); _gate.Dispose(); }

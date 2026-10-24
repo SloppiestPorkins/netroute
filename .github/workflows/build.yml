@@ -44,13 +44,32 @@ jobs:
           }
 
       # The feed is what every installed copy reads to decide whether to update itself. A typo
-      # here is a broken update for everyone, and it is three fields and a hash.
-      - name: Check the update feed parses
+      # here is a broken update for everyone. It has shipped a placeholder hash (64 zeros) and
+      # a template note before, so those are refused by name, and the installer the feed points
+      # at has to exist and hash to what the feed says.
+      - name: Check the update feed is real
         shell: pwsh
         run: |
           $feed = Get-Content updates.json -Raw | ConvertFrom-Json
           if (-not $feed.version -or -not $feed.url -or $feed.sha256 -notmatch '^[0-9A-Fa-f]{64}$') {
             throw "updates.json needs a version, a url and a 64-character sha256."
           }
+          if ($feed.version -notmatch '^\d+\.\d+\.\d+$') { throw "The version '$($feed.version)' is not major.minor.patch." }
           if ($feed.url -notlike 'https://*') { throw "The update url must be https." }
+          if ($feed.sha256 -match '^0+$') { throw "updates.json carries the all-zero placeholder sha256." }
+          if ($feed.notes -and $feed.notes -match 'Edit this line') { throw "updates.json still has the template note: write the real one." }
+          if (-not $feed.size -or [long]$feed.size -le 0) { throw "updates.json needs the installer's size in bytes." }
           Write-Host "$($feed.version) -> $($feed.url)"
+
+          # The release asset must exist and match: otherwise every user's update fails the hash check.
+          $file = Join-Path $env:RUNNER_TEMP 'feed-installer.exe'
+          $done = $false
+          foreach ($attempt in 1..3) {
+            try { Invoke-WebRequest -Uri $feed.url -OutFile $file -UseBasicParsing; $done = $true; break }
+            catch { Write-Host "Attempt $attempt failed: $($_.Exception.Message)"; Start-Sleep -Seconds (5 * $attempt) }
+          }
+          if (-not $done) { throw "Could not download $($feed.url). Publish the release before the feed." }
+          $actual = (Get-FileHash $file -Algorithm SHA256).Hash
+          if ($actual -ne $feed.sha256.ToUpperInvariant()) { throw "The installer hashes to $actual but updates.json says $($feed.sha256)." }
+          if ((Get-Item $file).Length -ne [long]$feed.size) { throw "The installer is $((Get-Item $file).Length) bytes but updates.json says $($feed.size)." }
+          Write-Host "Feed matches the published installer."

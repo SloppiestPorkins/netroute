@@ -193,6 +193,27 @@ internal static class WfpNative
         internal FWP_VALUE0 effectiveWeight;
     }
 
+    /// <summary>
+    /// FWPM_FILTER_ENUM_TEMPLATE0 (x64, 72 bytes). Only the provider key is used; the rest stay zero.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FWPM_FILTER_ENUM_TEMPLATE0
+    {
+        internal IntPtr providerKey;
+        internal Guid layerKey;
+        internal uint enumType;
+        internal uint flags;
+        internal IntPtr providerContextTemplate;
+        internal uint numFilterConditions;
+        private readonly uint _padding;
+        internal IntPtr filterCondition;
+        internal uint actionMask;
+        private readonly uint _padding2;
+        internal IntPtr calloutKey;
+    }
+
+    internal const uint FWP_FILTER_ENUM_OVERLAPPING = 1;
+
     // ---- Engine session ----
 
     [DllImport(Fwpuclnt, ExactSpelling = true)]
@@ -237,6 +258,26 @@ internal static class WfpNative
 
     [DllImport(Fwpuclnt, ExactSpelling = true)]
     internal static extern uint FwpmFilterDeleteById0(IntPtr engineHandle, ulong id);
+
+    // ---- Enumeration ----
+
+    [DllImport(Fwpuclnt, ExactSpelling = true)]
+    internal static extern uint FwpmSessionCreateEnumHandle0(IntPtr engineHandle, IntPtr enumTemplate, out IntPtr enumHandle);
+
+    [DllImport(Fwpuclnt, ExactSpelling = true)]
+    internal static extern uint FwpmSessionEnum0(IntPtr engineHandle, IntPtr enumHandle, uint requested, out IntPtr entries, out uint returned);
+
+    [DllImport(Fwpuclnt, ExactSpelling = true)]
+    internal static extern uint FwpmSessionDestroyEnumHandle0(IntPtr engineHandle, IntPtr enumHandle);
+
+    [DllImport(Fwpuclnt, ExactSpelling = true)]
+    internal static extern uint FwpmFilterCreateEnumHandle0(IntPtr engineHandle, ref FWPM_FILTER_ENUM_TEMPLATE0 enumTemplate, out IntPtr enumHandle);
+
+    [DllImport(Fwpuclnt, ExactSpelling = true)]
+    internal static extern uint FwpmFilterEnum0(IntPtr engineHandle, IntPtr enumHandle, uint requested, out IntPtr entries, out uint returned);
+
+    [DllImport(Fwpuclnt, ExactSpelling = true)]
+    internal static extern uint FwpmFilterDestroyEnumHandle0(IntPtr engineHandle, IntPtr enumHandle);
 
     // ---- Helpers ----
 

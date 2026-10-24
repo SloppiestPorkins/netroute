@@ -130,10 +130,22 @@ silently use the Download adapter.
 ## §16 Default mode
 NetRoute does not override Windows routing for that app.
 
+> **As built.** "Default" means NetRoute does not *place* the app. It is not "whatever Windows
+> would have chosen on its own": the split-tunnel driver moves one set of apps onto one
+> destination, so while at least one app is assigned to 🎮 Gaming, NetRoute makes the
+> ⬇ Downloads connection Windows' default route (lower IPv4 metric). Default apps, and everything
+> unlisted, therefore follow Downloads. The UI says "Downloads line, unless you add it" in that
+> state, and NetRoute leaves Windows' metrics alone when no app is on Gaming.
+
 ## §17 Preferred mode (later)
 Try the role first; if unavailable, use normal Windows routing. Not the default for games.
 
 ## §18 Kill switch
+
+> **As built.** The kill switch is Strict mode, not a second setting: a Strict app whose role is
+> unavailable is blocked, a Preferred app falls back. The state is shown as "Held" and described as
+> the rule in force; NetRoute does not observe or count refused connections (§25's "Action: BLOCKED"
+> is not implemented).
 
 ```text
 🔴 Halo Infinite

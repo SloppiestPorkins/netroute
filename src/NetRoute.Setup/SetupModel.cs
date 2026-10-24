@@ -184,6 +184,15 @@ public sealed class SetupModel : Observable
     /// <summary>Something could only be replaced at the next restart, so /quiet can say 3010.</summary>
     public bool RestartNeeded => _engine?.RestartNeeded == true;
 
+    /// <summary>/force: carry on removing even if Windows' network settings could not be put back.</summary>
+    public bool Force { get; set; }
+
+    /// <summary>The removal finished, but part of the job (restoring Windows' network settings) was not done.</summary>
+    public bool Incomplete => Succeeded && _engine?.RestoreIncomplete == true;
+
+    /// <summary>Removes the leftover uninstaller once the process that was waiting on this one has gone.</summary>
+    public void FinishDeferredDeletes() => _engine?.FinishDeferredDeletes();
+
     public bool Succeeded { get => _succeeded; private set => Set(ref _succeeded, value); }
     public bool Failed { get => _failed; private set => Set(ref _failed, value); }
     public double Progress { get => _progress; set => Set(ref _progress, value); }
@@ -199,7 +208,8 @@ public sealed class SetupModel : Observable
         SetUpDriver = SetUpDriver || DriverAlreadyRunning,
         StartWithWindows = StartWithWindows,
         DesktopShortcut = DesktopShortcut,
-        RemoveSettings = RemoveSettings
+        RemoveSettings = RemoveSettings,
+        Force = Force
     };
 
     /// <summary>Runs setup to the end. Used by the window (on a worker thread) and by /quiet.</summary>
@@ -234,7 +244,7 @@ public sealed class SetupModel : Observable
             Error = ex is SetupException ? ex.Message : "Something went wrong: " + ex.Message;
             Failed = true;
         }
-        return Succeeded;
+        return Succeeded && !Incomplete;
     }
 
     private void ShowWelcome()
@@ -244,7 +254,7 @@ public sealed class SetupModel : Observable
             ? "Version " + (_existing != null && _existing.Version != null ? _existing.Version : Machine.Version)
             : "Version " + Machine.Version
               + (_existing == null ? ""
-                  : _existing.Version == null ? "  ·  replaces the build from INSTALL-NETROUTE.cmd"
+                  : _existing.Version == null ? "  ·  replaces an earlier script-based install"
                   : _existing.Version == Machine.Version ? "  ·  already installed"
                   : "  ·  replaces " + _existing.Version);
         Intro = IsUninstall
@@ -276,9 +286,10 @@ public sealed class SetupModel : Observable
         var restart = _engine?.RestartNeeded == true;
         if (Succeeded)
         {
-            Heading = IsUninstall ? "NetRoute is removed" : "NetRoute is " + Past();
+            Heading = IsUninstall ? (Incomplete ? "NetRoute is removed, but Windows' network settings may not be back" : "NetRoute is removed") : "NetRoute is " + Past();
             DoneMessage = IsUninstall
-                ? "Normal Windows networking is restored." + (restart ? " Restart your PC to finish removing the split-tunnel driver." : "")
+                ? (Incomplete ? _engine.RestoreAdvice : "Normal Windows networking is restored.")
+                  + (restart ? " Restart your PC to finish removing the split-tunnel driver." : "")
                 : _action == SetupAction.Install
                     ? "Open NetRoute and choose which connection is for games and which is for downloads. It stays in the tray from now on."
                     : "Your apps and settings were kept, and protection is back on." + (restart ? " Restart your PC to finish the update." : "");
@@ -287,7 +298,7 @@ public sealed class SetupModel : Observable
         else
         {
             Heading = "Setup couldn't finish";
-            DoneMessage = Error + (_engine?.RolledBack == true ? " Your previous version was put back and is running again." : "");
+            DoneMessage = Error + (_engine?.RollbackSummary == null ? "" : " " + _engine.RollbackSummary);
             Page = "Failed";
         }
         Footer = LogPath == null ? null : "Log: " + LogPath;

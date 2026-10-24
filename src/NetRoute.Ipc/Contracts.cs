@@ -348,4 +348,27 @@ public sealed record ConnectionDto
     public uint? InterfaceIndex { get; init; }
     public string? State { get; init; }
     public Guid? MatchedRuleId { get; init; }
+
+    /// <summary>
+    /// Set (on every row) only when the service cut the list short: how many connections there
+    /// really were. Null means the list is complete. Carried on the rows rather than around the
+    /// list so the wire format stays a plain array that older apps and services still read.
+    /// </summary>
+    public int? TotalBeforeCut { get; init; }
+}
+
+/// <summary>Says out loud that a connection list has been cut, so a short list never passes for a complete one.</summary>
+public static class ConnectionListNote
+{
+    /// <summary>Null when the list is complete.</summary>
+    public static string? For(IReadOnlyList<ConnectionDto> rows)
+    {
+        var total = rows.Select(r => r.TotalBeforeCut).FirstOrDefault(t => t is not null);
+        if (total is not { } all || all <= rows.Count)
+        {
+            return null;
+        }
+        return $"Showing {rows.Count} of {all} connections. Ones with a remote address come first, established before the rest, " +
+               $"so the {all - rows.Count} left out are mostly listening or idle sockets.";
+    }
 }

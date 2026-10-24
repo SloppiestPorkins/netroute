@@ -10,7 +10,7 @@ public enum EnforcementAction
     /// <summary>Permit only on the role's adapter; block every other interface.</summary>
     PinToAdapter,
 
-    /// <summary>Block all traffic — the role is unavailable and the kill switch is on.</summary>
+    /// <summary>Block all traffic — the role is unavailable and the rule is Strict, so nothing may fall back.</summary>
     BlockAll,
 
     /// <summary>Role unavailable, Preferred mode, so Windows routing is allowed to take over.</summary>

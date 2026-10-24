@@ -106,9 +106,11 @@ internal static class WfpMeasureProof
         Console.WriteLine($"{rules.Count} rules, {images} program files.");
 
         var plan = resolver.Resolve(real with { AppRules = rules });
-        using var session = WfpSession.Open();
+        using var session = WfpSession.Open(PocIdentities.Measure);
         var enforcer = new WfpEnforcer(session, discovery, collapse);
         Console.WriteLine($"Collapse program files: {collapse?.ToString() ?? $"default ({WfpEnforcer.CollapseProgramFilesByDefault})"}");
+        Console.WriteLine("Each line below is one apply. 'commit' is the time the engine held its lock swapping the filters in; 'slowest new connection' is the worst time for a new TCP connection made by this process during that apply.");
+        PocIdentities.ReportCoexistence(session);
 
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -156,12 +158,14 @@ internal static class WfpMeasureProof
             }
         }
 
+        var worstDuring = 0.0;
         void Report(string label, Func<EnforcementResult> apply)
         {
             var from = clock.Elapsed.TotalMilliseconds;
             var r = apply();
             var to = clock.Elapsed.TotalMilliseconds;
             var (lb, ex) = Slowest(from - 20, to + 20);
+            worstDuring = Math.Max(worstDuring, Math.Max(lb, ex));
             Console.WriteLine($"{label,-30} apply {r.Elapsed.TotalMilliseconds,7:F1} ms  commit {r.CommitTime.TotalMilliseconds,7:F1} ms  added {r.FiltersAdded,5}  removed {r.FiltersRemoved,5}  installed {r.FiltersInstalled,5}  failed {r.Failed.Count}  slowest new connection: loopback {lb:F1} ms, external {ex:F1} ms");
         }
 
@@ -170,6 +174,8 @@ internal static class WfpMeasureProof
         Console.WriteLine($"idle, nothing applying: slowest new connection: loopback {idleLb:F1} ms, external {idleEx:F1} ms");
 
         Report("first apply", () => enforcer.Apply(plan));
+        var listed = ListedCount(session);
+        Console.WriteLine($"engine lists {listed} filter(s) under this proof's provider; the enforcer believes {enforcer.InstalledFilterCount}. {(listed == enforcer.InstalledFilterCount ? "They agree." : "MISMATCH - the enumeration or the add path is wrong; do not trust other numbers until explained.")}");
         for (var k = 1; k <= 3; k++)
         {
             Thread.Sleep(300);
@@ -190,8 +196,29 @@ internal static class WfpMeasureProof
         probe.Join();
         listener.Stop();
         enforcer.EmergencyDisable();
-        Console.WriteLine($"filters left after disable: {enforcer.InstalledFilterCount}");
+        Console.WriteLine($"filters left after disable: {enforcer.InstalledFilterCount} (enforcer), {ListedCount(session)} (engine)");
+
+        var idleWorst = Math.Max(idleLb, idleEx);
+        Console.WriteLine();
+        Console.WriteLine("=== SUMMARY ===");
+        Console.WriteLine($"Slowest new connection while idle: {idleWorst:F1} ms. Slowest during any apply: {worstDuring:F1} ms.");
+        Console.WriteLine(worstDuring > idleWorst + 100
+            ? "  STALL - a new connection took more than 100 ms longer during an apply than when idle. Compare the 'commit' column: the apply that stalled is the one to fix."
+            : "  NO STALL - no new connection was more than 100 ms slower during an apply than when idle (the threshold is arbitrary; read the raw lines).");
         return 0;
+    }
+
+    private static int ListedCount(WfpSession session)
+    {
+        try
+        {
+            return session.EnumerateFilterIds(session.Identity.ProviderKey).Count;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  (could not list filters: {ex.Message})");
+            return -1;
+        }
     }
 
     private static double TimeConnect(IPAddress address, int port)

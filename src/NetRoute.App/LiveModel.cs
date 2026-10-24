@@ -120,7 +120,7 @@ public sealed class LiveTracker
             PlacementState.Split => $"Using {verdict.Using}: part of it is off {role} ({expected})",
             PlacementState.OnAssigned => $"On {verdict.Using}",
             PlacementState.Idle => hasTraffic ? $"On {expected}" : $"Idle. Assigned to {role} ({expected})",
-            _ => verdict.Using is { } on ? $"On {on}. Windows decides" : app.Rule.Paused ? "Paused. Windows decides" : "Windows decides"
+            _ => verdict.Using is { } on ? $"On {on}. Not placed by NetRoute" : app.Rule.Paused ? "Paused. Not placed by NetRoute" : "Not placed by NetRoute"
         };
     }
 }

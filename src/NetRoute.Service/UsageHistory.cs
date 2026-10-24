@@ -40,29 +40,45 @@ public sealed class UsageHistory(IAppTotalsSource rates, ILogger<UsageHistory> l
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Directory.CreateDirectory(_folder);
-        Load(DateTime.Today);
-        Prune();
+        try
+        {
+            Directory.CreateDirectory(_folder);
+            Load(DateTime.Today);
+            Prune();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A history folder that can't be made must not stop the enforcement service.
+            logger.LogWarning(ex, "Preparing the usage history folder failed.");
+        }
 
         var flushed = DateTimeOffset.UtcNow;
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                Sample();
-                if (DateTimeOffset.UtcNow - flushed > TimeSpan.FromMinutes(1))
+                try
                 {
-                    Flush();
-                    flushed = DateTimeOffset.UtcNow;
+                    Sample();
+                    if (DateTimeOffset.UtcNow - flushed > TimeSpan.FromMinutes(1))
+                    {
+                        Flush();
+                        flushed = DateTimeOffset.UtcNow;
+                    }
                 }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Recording usage failed.");
+                }
+                await Task.Delay(Interval, stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogWarning(ex, "Recording usage failed.");
-            }
-            await Task.Delay(Interval, stoppingToken);
         }
-        Flush();
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        finally
+        {
+            // The delay throws on stop, so without this the last minute was never written.
+            Flush();
+        }
     }
 
     /// <summary>One reading. The loop calls this every 15 seconds; tests call it directly.</summary>

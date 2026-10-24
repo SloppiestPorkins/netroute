@@ -84,6 +84,24 @@ internal static class Upgrade
     public static string Page(UpdateDto update) => Updates.ReleaseFor(update.Version);
 }
 
+/// <summary>Whether this process holds an elevated administrator token, the same test the service applies to the caller.</summary>
+internal static class Elevation
+{
+    public static bool IsElevated()
+    {
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+}
+
 /// <summary>
 /// The Updates panel: where NetRoute looks, whether it looks by itself, and what it found.
 ///
@@ -104,6 +122,15 @@ public partial class UpdatesViewModel(MainViewModel main) : ObservableObject
     [ObservableProperty] private double _fraction;
     [ObservableProperty] private bool _showProgress;
     [ObservableProperty] private string? _problem;
+
+    /// <summary>
+    /// The service refuses to change the update address or the automatic setting unless this
+    /// process is an elevated administrator, so the controls are off (with the reason) rather than
+    /// letting someone type an address and meet a failure.
+    /// </summary>
+    public bool CanChangeSettings { get; } = Elevation.IsElevated();
+
+    public string? SettingsLockedNote => CanChangeSettings ? null : StatusWording.UpdateSettingsNeedAdmin;
 
     private UpdateDto? _update;
 
@@ -148,6 +175,11 @@ public partial class UpdatesViewModel(MainViewModel main) : ObservableObject
     [RelayCommand]
     private async Task Save()
     {
+        if (!CanChangeSettings)
+        {
+            Problem = StatusWording.UpdateSettingsNeedAdmin;
+            return;
+        }
         var url = FeedUrl.Trim();
         if (url.Length > 0 && !(Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps))
         {

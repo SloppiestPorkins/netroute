@@ -1,11 +1,20 @@
+using System.Text.Json.Serialization;
+
 namespace NetRoute.Core.Policy;
 
 public enum RoutingMode
 {
-    /// <summary>NetRoute does not interfere. Windows routing applies (§16).</summary>
+    /// <summary>
+    /// NetRoute does not place this app (§16). It follows Windows' default route, which NetRoute
+    /// points at the Downloads connection while any app is assigned to Gaming (see RedirectPlanner).
+    /// </summary>
     Default,
 
-    /// <summary>Only the assigned role's adapter may be used. If it is down, traffic is blocked (§15).</summary>
+    /// <summary>
+    /// Only the assigned role's adapter may be used. If it is down, the app's traffic is held
+    /// (blocked) rather than sent anywhere else (§15, §18). This is the "kill switch": there is no
+    /// separate setting for it, because "strict but allowed to fall back" is what Preferred is.
+    /// </summary>
     Strict,
 
     /// <summary>Try the assigned role; fall back to Windows routing when it is unavailable (§17).</summary>
@@ -27,19 +36,20 @@ public sealed record AppRule
     /// <summary>Strict is the correct default for games; see §15 and §17.</summary>
     public RoutingMode Mode { get; init; } = RoutingMode.Strict;
 
-    /// <summary>Block rather than let traffic fall back to another network when the role is down (§18).</summary>
-    public bool KillSwitch { get; init; } = true;
-
-    public bool EnforceIpv4 { get; init; } = true;
     public bool EnforceIpv6 { get; init; } = true;
-    public bool EnforceTcp { get; init; } = true;
-    public bool EnforceUdp { get; init; } = true;
 
     /// <summary>Temporarily suspended by the user without deleting the rule (§29).</summary>
     public bool Paused { get; init; }
 
-    /// <summary>Apply to child processes of this application as well (§13).</summary>
-    public bool IncludeRelatedProcesses { get; init; }
+    // ---- Retired settings -------------------------------------------------------------------
+    //
+    // These used to be rule settings that nothing in the UI, CLI or IPC could change, or that
+    // changed nothing at all. They are no longer stored in the config or sent over the pipe
+    // (JsonIgnore), and nobody can set them: they are constants that say what has always been the
+    // behaviour. They remain only because NetRouteEngine's rule fingerprint and WFP FilterPlanner
+    // still read them; delete these five lines when those two references are removed.
+
+    /// <summary>Always <c>Mode == Strict</c>: the kill switch and Strict mode are one thing.</summary>
 
     public static AppRule Create(AppIdentity app, RoleId role) => new()
     {

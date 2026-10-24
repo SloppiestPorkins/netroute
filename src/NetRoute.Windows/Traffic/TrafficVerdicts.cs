@@ -70,8 +70,7 @@ public static class TrafficVerdicts
             ExpectedAdapter = app.ResolvedAdapter?.Name ?? "none (blocked)",
             ObservedAdapter = c.AdapterName ?? "another network",
             Protocol = c.Protocol,
-            RemoteEndpoint = c.Remote?.ToString() ?? "(not connected)",
-            Blocked = false
+            RemoteEndpoint = c.Remote?.ToString() ?? "(not connected)"
         }).ToList();
 
         if (app.Action == EnforcementAction.BlockAll)
@@ -86,7 +85,7 @@ public static class TrafficVerdicts
                 Leaks = leaks,
                 Summary = leaks.Count > 0
                     ? $"Leak: traffic seen on {leaks[0].ObservedAdapter} while {rule.Role.DisplayName()} is unavailable."
-                    : $"{rule.Role.DisplayName()} network unavailable. Traffic blocked by Kill Switch."
+                    : $"{rule.Role.DisplayName()} network unavailable. Strict mode is blocking this app rather than letting it use another network."
             };
         }
 
@@ -104,13 +103,27 @@ public static class TrafficVerdicts
                 Summary = $"Leak: new traffic seen on {leaks[0].ObservedAdapter} instead of {name}."
             };
         }
-        if (onExpected > 0)
+        // A socket merely bound to the adapter's address is not use of that adapter. An mDNS or
+        // SSDP listener sits there on every app that has one, never sends anything, and used to be
+        // enough to call a rule Verified -- so "Verified" could mean nothing had been observed at
+        // all. It has to be a connection that went somewhere.
+        var inUse = attributed.Count(c => c.AdapterLuid == expected && Carrying(c));
+        if (inUse > 0)
         {
             return new AppVerification
             {
                 RuleId = rule.Id, State = VerificationState.Verified, ObservedAdapterName = name,
                 ActiveConnections = mine.Count, PreexistingConnections = older,
-                Summary = $"Verified: using {name} ({Count(onExpected, "connection")}).{olderNote}"
+                Summary = $"Verified: using {name} ({Count(inUse, "connection")}).{olderNote}"
+            };
+        }
+        if (onExpected > 0)
+        {
+            return new AppVerification
+            {
+                RuleId = rule.Id, State = VerificationState.Configured, ObservedAdapterName = name,
+                ActiveConnections = mine.Count, PreexistingConnections = older,
+                Summary = $"Applied for {name}. {Count(onExpected, "socket")} bound there, none of them carrying traffic yet."
             };
         }
         return new AppVerification
@@ -122,6 +135,13 @@ public static class TrafficVerdicts
                 : $"Applied for {name}. No network activity right now."
         };
     }
+
+    /// <summary>
+    /// Whether this socket is evidence the app is actually using the network it is on, rather than
+    /// just listening on it: a remote peer, or TCP saying the connection is up.
+    /// </summary>
+    private static bool Carrying(ObservedConnection c)
+        => c.Remote is not null || string.Equals(c.State, "Established", StringComparison.OrdinalIgnoreCase);
 
     private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
 }

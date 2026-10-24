@@ -78,7 +78,8 @@ internal static class WfpProof
         var config = BuildConfig(gaming);
         var plan = new PolicyResolver(discovery).Resolve(config);
 
-        using var session = WfpSession.Open();
+        using var session = WfpSession.Open(PocIdentities.Wfp);
+        PocIdentities.ReportCoexistence(session);
         var enforcer = new WfpEnforcer(session, discovery);
 
         var result = enforcer.Apply(plan);

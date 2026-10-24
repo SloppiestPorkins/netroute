@@ -53,9 +53,14 @@ public partial class App : Application
             }) { IsBackground = true }.Start();
         }
 
+#if DEBUG
+        // --demo (invented data, for screenshots) exists only in Debug builds.
         INetRouteClient client = args.Contains("--demo")
             ? new DemoNetRouteClient(firstRun: args.Contains("--first-run"))
             : new NamedPipeNetRouteClient();
+#else
+        INetRouteClient client = new NamedPipeNetRouteClient();
+#endif
 
         _vm = new MainViewModel(client);
         _window = new MainWindow(_vm, screenshot, Value(args, "--view"));
@@ -122,7 +127,7 @@ public partial class App : Application
             pause.DropDownItems.Add(label, null, (_, _) => _vm?.PauseForCommand.Execute(minutes));
         }
         var resume = new Forms.ToolStripMenuItem("Resume protection", null, (_, _) => _vm?.ResumeCommand.Execute(null));
-        var prove = new Forms.ToolStripMenuItem("Prove it works…", null, (_, _) =>
+        var prove = new Forms.ToolStripMenuItem("Test connections…", null, (_, _) =>
         {
             ShowWindow();
             _vm?.OpenSelfTestCommand.Execute(null);

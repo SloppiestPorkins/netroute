@@ -59,13 +59,15 @@ public class PolicyResolverTests
     [Fact]
     public void StrictRuleBlocksWhenAdapterGoesOffline()
     {
-        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict, killSwitch: true);
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict);
 
         var plan = Resolve(config, Ethernet(state: AdapterState.Disconnected), Wifi());
         var app = plan.Applications.Single();
 
         Assert.Equal(EnforcementAction.BlockAll, app.Action);
-        Assert.Contains(app.Reasons, r => !r.Good && r.Text.Contains("Kill Switch"));
+        // Strict IS the kill switch now: the reason names Strict mode, not a separate flag.
+        Assert.Contains(app.Reasons, r => !r.Good && r.Text.Contains("Strict mode") && r.Text.Contains("blocked"));
+        Assert.DoesNotContain(app.Reasons, r => r.Text.Contains("Kill Switch"));
 
         // The failure mode this guards against is quietly resolving to the other
         // connected adapter, which would be a leak presented as success.
@@ -76,7 +78,7 @@ public class PolicyResolverTests
     [Fact]
     public void PreferredRuleFallsBackWhenAdapterGoesOffline()
     {
-        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Preferred, killSwitch: false);
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Preferred);
 
         var plan = Resolve(config, Ethernet(state: AdapterState.Disconnected), Wifi());
 
@@ -90,7 +92,7 @@ public class PolicyResolverTests
     [Fact]
     public void Ipv4OnlyRoleBlocksIpv6ToPreventBypass()
     {
-        var config = SingleApp(RoleId.Downloads, WifiLuid, RoutingMode.Strict, killSwitch: true);
+        var config = SingleApp(RoleId.Downloads, WifiLuid, RoutingMode.Strict);
 
         var plan = Resolve(config, Ethernet(), Wifi());
         var app = plan.Applications.Single();
@@ -104,7 +106,7 @@ public class PolicyResolverTests
     [Fact]
     public void DualStackRoleEnforcesIpv6()
     {
-        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict, killSwitch: true);
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict);
 
         var app = Resolve(config, Ethernet(), Wifi()).Applications.Single();
 
@@ -116,7 +118,7 @@ public class PolicyResolverTests
     [Fact]
     public void MissingAdapterBlocksRatherThanResolvingElsewhere()
     {
-        var config = SingleApp(RoleId.Gaming, adapterLuid: 0xDEADBEEF, RoutingMode.Strict, killSwitch: true);
+        var config = SingleApp(RoleId.Gaming, adapterLuid: 0xDEADBEEF, RoutingMode.Strict);
 
         var app = Resolve(config, Ethernet(), Wifi()).Applications.Single();
 
@@ -127,7 +129,7 @@ public class PolicyResolverTests
     [Fact]
     public void GlobalPauseStopsEnforcementWithoutLosingRules()
     {
-        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict, killSwitch: true)
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict)
             with { EnforcementPaused = true };
 
         var plan = Resolve(config, Ethernet(), Wifi());
@@ -140,7 +142,7 @@ public class PolicyResolverTests
     [Fact]
     public void EveryDecisionProducesReasons()
     {
-        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict, killSwitch: true);
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict);
 
         foreach (var ethernetState in new[] { AdapterState.Connected, AdapterState.Disconnected })
         {
@@ -159,13 +161,13 @@ public class PolicyResolverTests
         => plan.Applications.Single(a => a.Rule.App.DisplayName == displayName);
 
     private static NetRouteConfig SingleApp(
-        RoleId role, ulong adapterLuid, RoutingMode mode, bool killSwitch)
+        RoleId role, ulong adapterLuid, RoutingMode mode)
     {
         var app = AppIdentity.ForExecutable(@"C:\Games\Halo.exe", "Halo Infinite");
         return new NetRouteConfig
         {
             RoleBindings = [new RoleBinding { Role = role, AdapterLuid = adapterLuid, LastKnownName = "Ethernet" }],
-            AppRules = [AppRule.Create(app, role) with { Mode = mode, KillSwitch = killSwitch }]
+            AppRules = [AppRule.Create(app, role) with { Mode = mode }]
         };
     }
 

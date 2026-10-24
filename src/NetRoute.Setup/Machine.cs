@@ -34,8 +34,11 @@ internal static class Machine
     public static string StartupLink => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "NetRoute.lnk");
     public static string DesktopLink => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), "NetRoute.lnk");
 
-    /// <summary>Where INSTALL-NETROUTE.cmd put its sign-in shortcut. Replaced by the all-users one.</summary>
+    /// <summary>Where the earlier script-based install put its sign-in shortcut. Replaced by the all-users one.</summary>
     public static string OldStartupLink => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "NetRoute.lnk");
+
+    /// <summary>NetRoute's record of the connection settings it changed, which is what restores them.</summary>
+    public static string RouteStatePath => Path.Combine(DataDir, "route-state.json");
 
     public static string Version => typeof(Machine).Assembly.GetName().Version.ToString(3);
 
@@ -98,6 +101,15 @@ internal static class Machine
             {
                 key.SetValue(name, value ?? "");
             }
+        }
+    }
+
+    public static void DeleteState(string name)
+    {
+        using (var hklm = Hklm())
+        using (var key = hklm.OpenSubKey(StateKeyPath, writable: true))
+        {
+            key?.DeleteValue(name, false);
         }
     }
 

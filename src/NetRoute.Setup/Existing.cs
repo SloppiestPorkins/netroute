@@ -21,7 +21,7 @@ public enum SetupAction
 /// <para>Three things are looked at, because any of them can be true on its own. The uninstall
 /// key is what Settings &gt; Apps shows and is the only place a version is written down. The
 /// service is what actually protects the PC. And the files are what an earlier build left behind
-/// when it was installed by INSTALL-NETROUTE.cmd, which registered nothing at all — that install
+/// when it was installed by the old install script (since removed), which registered nothing at all — that install
 /// has no version, so setup calls it what it is rather than guessing a number.</para>
 /// </summary>
 internal sealed class Existing

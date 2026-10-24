@@ -42,11 +42,10 @@ public sealed record LeakObservation
     public required TransportProtocol Protocol { get; init; }
     public required string RemoteEndpoint { get; init; }
 
-    /// <summary>
-    /// True when WFP refused the flow. A blocked attempt is evidence the policy is
-    /// working, not a leak, but the user is still told about it.
-    /// </summary>
-    public required bool Blocked { get; init; }
+    // There was a Blocked flag here, meaning "WFP refused this flow". Nothing could ever set it:
+    // NetRoute sees connections that exist, not attempts that were turned away, so it was always
+    // false -- which reads as "nothing was ever blocked", a thing we cannot know. Reporting blocked
+    // attempts would need a WFP event subscription, and until there is one there is nothing to say.
 }
 
 /// <summary>The verification result for one rule.</summary>
@@ -105,7 +104,7 @@ public sealed class PlanOnlyVerifier : IAppVerifier
         {
             RuleId = app.Rule.Id,
             State = VerificationState.Blocked,
-            Summary = $"{app.Rule.Role.DisplayName()} network unavailable. Traffic blocked by Kill Switch."
+            Summary = $"{app.Rule.Role.DisplayName()} network unavailable. Strict mode is blocking this app rather than letting it use another network."
         },
         _ => new AppVerification
         {

@@ -189,7 +189,7 @@
             </StackPanel>
         </DataTemplate>
 
-        <!-- Prove it: the self-test -->
+        <!-- Connection test (the self-test) -->
         <DataTemplate DataType="{x:Type local:SelfTestViewModel}">
             <Grid Width="680" MaxHeight="580">
                 <Grid.RowDefinitions>
@@ -198,7 +198,7 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <TextBlock Text="Prove it" Style="{StaticResource H2}" />
+                <TextBlock Text="Test your connections" Style="{StaticResource H2}" />
                 <TextBlock Grid.Row="1" Text="{Binding Summary}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,6,0,16" />
                 <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
                     <ItemsControl ItemsSource="{Binding Steps}">
@@ -281,8 +281,11 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <TextBlock Text="RECENT CONNECTIONS" Style="{StaticResource Section}" Margin="0,18,0,8"
+                        <TextBlock Text="RECENT CONNECTIONS" Style="{StaticResource Section}" Margin="0,18,0,4"
                                    Visibility="{Binding Connections.Count, Converter={StaticResource CountVisibility}}" />
+                        <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Visibility="{Binding Connections.Count, Converter={StaticResource CountVisibility}}"
+                                   Text="Names are looked up through your Windows DNS server, only for the addresses listed here and only while this window is open. Addresses on your own network are never looked up." />
                         <ItemsControl ItemsSource="{Binding Connections}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
@@ -431,8 +434,11 @@
                     <TextBlock Text="Where to look" FontWeight="SemiBold" />
                     <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,8"
                                Text="NetRoute's own releases, by default. Any https address answering with a version, a download link and its sha256 works. Leave it empty and NetRoute never calls anywhere." />
-                    <TextBox Text="{Binding FeedUrl, UpdateSourceTrigger=PropertyChanged}" Tag="https://raw.githubusercontent.com/&#8230;/updates.json" />
-                    <CheckBox IsChecked="{Binding Automatic}" Margin="0,14,0,0">
+                    <TextBox Text="{Binding FeedUrl, UpdateSourceTrigger=PropertyChanged}" Tag="https://raw.githubusercontent.com/&#8230;/updates.json"
+                             IsEnabled="{Binding CanChangeSettings}" />
+                    <TextBlock Text="{Binding SettingsLockedNote}" Foreground="{StaticResource WarnBrush}" TextWrapping="Wrap" Margin="0,8,0,0"
+                               Visibility="{Binding SettingsLockedNote, Converter={StaticResource NullVisibility}}" />
+                    <CheckBox IsChecked="{Binding Automatic}" Margin="0,14,0,0" IsEnabled="{Binding CanChangeSettings}">
                         <StackPanel>
                             <TextBlock Text="Look once a day and fetch what you find" FontWeight="SemiBold" />
                             <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0"
@@ -455,7 +461,7 @@
                            Visibility="{Binding Problem, Converter={StaticResource NullVisibility}}" />
 
                 <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
-                    <Button Content="Save" Margin="0,0,8,0" Command="{Binding SaveCommand}" />
+                    <Button Content="Save" Margin="0,0,8,0" Command="{Binding SaveCommand}" IsEnabled="{Binding CanChangeSettings}" />
                     <Button Style="{StaticResource PrimaryButton}" Content="{Binding ActionText}" Margin="0,0,8,0" Command="{Binding ActCommand}" />
                     <Button Content="Close" IsCancel="True"
                             Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
@@ -557,7 +563,7 @@
             </Border>
             <TextBlock Text="NetRoute's background service isn't running" Style="{StaticResource H2}" TextAlignment="Center" Margin="0,20,0,0" />
             <TextBlock Style="{StaticResource Caption}" FontSize="14" TextAlignment="Center" TextWrapping="Wrap" Margin="0,10,0,0" LineHeight="21"
-                       Text="Until it's running, nothing is keeping your apps on the network you chose. Start it here (Windows will ask for permission), or run INSTALL-NETROUTE.cmd if it isn't installed." />
+                       Text="Until it's running, nothing is keeping your apps on the network you chose. Start it here (Windows will ask for permission). If that doesn't work, run the NetRoute installer again and choose Repair." />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
                 <Button Style="{StaticResource PrimaryButton}" MinWidth="150" Margin="0,0,8,0" Command="{Binding StartServiceCommand}">
                     <StackPanel Orientation="Horizontal">
@@ -595,7 +601,7 @@
                     <DockPanel>
                         <TextBlock Style="{StaticResource Icon}" Text="&#xE946;" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Top" Margin="0,2,10,0" />
                         <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" LineHeight="19"
-                                   Text="Your Download network becomes Windows' default connection, so Steam, browsers and updates use it without being told. Games you put on Gaming are moved onto the Gaming network, together with anything they start." />
+                                   Text="Once you put a game on Gaming, your Download network becomes Windows' default connection. That means Steam, browsers and updates use it without being told, and so does everything you haven't listed, such as Discord voice or a new browser. Games on Gaming are moved onto the Gaming network, together with anything they start." />
                     </DockPanel>
                 </Border>
                 <Button Content="Finish" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,22,0,0" MinWidth="130"
@@ -617,10 +623,10 @@
             <!-- Header -->
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Command="{Binding OpenSelfTestCommand}" Margin="0,0,8,0" ToolTip="Test your connections for real: are they separate, and does a download slow your game?">
+                    <Button Command="{Binding OpenSelfTestCommand}" Margin="0,0,8,0" ToolTip="Do your two connections work, stay separate, and leave each other alone under a download? This tests your connections, not NetRoute itself.">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE768;" Margin="0,0,8,0" />
-                            <TextBlock Text="Prove it" />
+                            <TextBlock Text="Test connections" />
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding OpenCheckupCommand}" Margin="0,0,8,0" ToolTip="Check everything that affects where your traffic goes">

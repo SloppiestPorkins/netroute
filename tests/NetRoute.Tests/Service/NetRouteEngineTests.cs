@@ -48,7 +48,10 @@ public sealed class NetRouteEngineTests : IDisposable
         await engine.ReconcileAsync();
         var offline = await engine.GetStatusAsync();
         Assert.Equal(EnforcementAction.BlockAll, offline.Apps.Single().Action);
-        Assert.Contains(offline.RecentEvents, e => e.Kind == ServiceEventKind.RoleOffline && e.Message.Contains("1 apps are protected"));
+        // The event has to say what actually happened to the apps: a Strict rule is held, and a
+        // Preferred one is let through to Windows routing. It used to call all of them "protected".
+        Assert.Contains(offline.RecentEvents, e => e.Kind == ServiceEventKind.RoleOffline
+            && e.Message.Contains("1 app on Strict is blocked"));
 
         source.Adapters = [Ethernet(), Wifi()];
         await engine.ReconcileAsync();

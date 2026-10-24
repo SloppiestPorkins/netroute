@@ -24,6 +24,15 @@
     <!-- The live view's decisions live in plain files in the WPF project; linked in so they can be tested without a window. -->
     <Compile Include="..\..\src\NetRoute.App\LiveModel.cs" Link="App\LiveModel.cs" />
     <Compile Include="..\..\src\NetRoute.App\Format.cs" Link="App\Format.cs" />
+    <Compile Include="..\..\src\NetRoute.App\Wording.cs" Link="App\Wording.cs" />
+
+    <!-- Setup's decision rules, which are deliberately free of the machine so they can be tested
+         here. Linked rather than referenced: NetRoute.Setup is a WPF program with the whole
+         payload embedded in it. -->
+    <Compile Include="..\..\src\NetRoute.Setup\Logic\RestorePolicy.cs" Link="Setup\RestorePolicy.cs" />
+    <Compile Include="..\..\src\NetRoute.Setup\Logic\RollbackPlan.cs" Link="Setup\RollbackPlan.cs" />
+    <Compile Include="..\..\src\NetRoute.Setup\Logic\SelfDelete.cs" Link="Setup\SelfDelete.cs" />
+    <Compile Include="..\..\src\NetRoute.Setup\Logic\SetupExit.cs" Link="Setup\SetupExit.cs" />
   </ItemGroup>
 
   <ItemGroup>

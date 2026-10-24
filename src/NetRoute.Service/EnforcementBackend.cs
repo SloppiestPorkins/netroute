@@ -53,21 +53,44 @@ public sealed class WfpEnforcementBackend : IEnforcementBackend
     private readonly SplitTunnelController _split;
     private readonly DefaultRouteManager _routes;
 
+    /// <summary>
+    /// Serialises everything that touches the enforcer, the driver or the route table.
+    ///
+    /// <para>This used to be the engine's own gate, which is also held across reading config and
+    /// resolving policy. Emergency Disable therefore queued behind a whole reconcile, and it is
+    /// the one thing someone reaches for when their network is broken. The lock lives here now so
+    /// Emergency Disable waits only for an enforcement call that is genuinely in flight (24 Oct
+    /// 2026).</para>
+    /// </summary>
+    private readonly object _lock = new();
+
     public WfpEnforcementBackend()
     {
         var adapters = new AdapterDiscovery();
         _session = WfpSession.Open();
-        _enforcer = new WfpEnforcer(_session, adapters);
-        _routes = new DefaultRouteManager(adapters);
-        _split = new SplitTunnelController(_routes);
+        try
+        {
+            _enforcer = new WfpEnforcer(_session, adapters);
+            _routes = new DefaultRouteManager(adapters);
+            _split = new SplitTunnelController(_routes);
+        }
+        catch
+        {
+            // Don't leave a session (and its provider) held by a backend that never came to exist.
+            _session.Dispose();
+            throw;
+        }
     }
 
     public string FixRouteTie(RouteTie tie, NetworkAdapter preferred)
     {
-        var message = _routes.ResolveTie(tie.Adapters, preferred);
-        // While NetRoute manages the default route, put its own settings back on top.
-        _split.Invalidate();
-        return message;
+        lock (_lock)
+        {
+            var message = _routes.ResolveTie(tie.Adapters, preferred);
+            // While NetRoute manages the default route, put its own settings back on top.
+            _split.Invalidate();
+            return message;
+        }
     }
 
     public bool IsAvailable => true;
@@ -76,39 +99,48 @@ public sealed class WfpEnforcementBackend : IEnforcementBackend
 
     public BackendApplyResult Apply(EnforcementPlan plan)
     {
-        var result = _enforcer.Apply(plan);
-        return new(result.Failed.Select(f => new RuleEnforcementFailure(f.Enforcement.Rule.Id, f.Error)).ToList(),
-            result.SystemDownloadsError?.FriendlyMessage)
+        lock (_lock)
         {
-            FiltersRemoved = result.FiltersRemoved,
-            FiltersAdded = result.FiltersAdded,
-            Elapsed = result.Elapsed,
-            CommitTime = result.CommitTime
-        };
+            var result = _enforcer.Apply(plan);
+            return new(result.Failed.Select(f => new RuleEnforcementFailure(f.Enforcement.Rule.Id, f.Error)).ToList(),
+                result.SystemDownloadsError?.FriendlyMessage)
+            {
+                FiltersRemoved = result.FiltersRemoved,
+                FiltersAdded = result.FiltersAdded,
+                Elapsed = result.Elapsed,
+                CommitTime = result.CommitTime
+            };
+        }
     }
 
     public string? ApplyRedirect(RedirectPlan plan)
     {
-        var outcome = _split.Apply(plan);
-        if (outcome.Engaged)
+        lock (_lock)
         {
-            var route = outcome.RouteNote is { } note && note.Contains("still", StringComparison.Ordinal) ? $" Warning: {note}" : string.Empty;
-            return $"On. {outcome.SplitImages} Gaming program file(s) are moved onto {plan.Gaming!.Name}; " +
-                   $"{plan.Downloads!.Name} is Windows' default connection.{route}";
+            var outcome = _split.Apply(plan);
+            if (outcome.Engaged)
+            {
+                var route = outcome.RouteNote is { } note && note.Contains("still", StringComparison.Ordinal) ? $" Warning: {note}" : string.Empty;
+                return $"On. {outcome.SplitImages} Gaming program file(s) are moved onto {plan.Gaming!.Name}; " +
+                       $"{plan.Downloads!.Name} is Windows' default connection.{route}";
+            }
+            return $"Off. {outcome.Problem ?? plan.Reason ?? "Nothing to move."}";
         }
-        return $"Off. {outcome.Problem ?? plan.Reason ?? "Nothing to move."}";
     }
 
     public void EmergencyDisable()
     {
-        // Filters first: they are the part that can cut traffic off.
-        try
+        lock (_lock)
         {
-            _enforcer.EmergencyDisable();
-        }
-        finally
-        {
-            _split.DisableAll();
+            // Filters first: they are the part that can cut traffic off.
+            try
+            {
+                _enforcer.EmergencyDisable();
+            }
+            finally
+            {
+                _split.DisableAll();
+            }
         }
     }
 
@@ -134,4 +166,81 @@ public sealed class NullEnforcementBackend(string? reason = null) : IEnforcement
     public BackendApplyResult Apply(EnforcementPlan plan) => BackendApplyResult.Success;
     public void EmergencyDisable() { }
     public void Dispose() { }
+}
+
+/// <summary>
+/// The backend the service runs: it opens the real one when it can and keeps trying when it can't.
+///
+/// <para>Windows may not have the Base Filtering Engine ready when the service starts, and another
+/// copy of NetRoute may be enforcing; neither should switch protection off for the life of the
+/// process. While there is no inner backend, <see cref="IsAvailable"/> is false and
+/// <see cref="UnavailableReason"/> says why, and every <see cref="Apply"/> tries to open again.
+/// <see cref="NetRouteEngine"/> treats an apply that left the backend unavailable as a failed one
+/// and re-applies on its existing 10 s / 30 s / 2 min / 5 min backoff, so there is no second timer.</para>
+/// </summary>
+public sealed class RetryingEnforcementBackend : IEnforcementBackend
+{
+    private readonly Func<IEnforcementBackend> _open;
+    private readonly object _lock = new();
+    private IEnforcementBackend? _inner;
+    private string? _reason;
+
+    /// <param name="open">Creates the real backend; throws when WFP isn't usable yet.</param>
+    public RetryingEnforcementBackend(Func<IEnforcementBackend> open)
+    {
+        _open = open;
+        TryOpen();
+    }
+
+    /// <summary>The service's backend: real WFP enforcement, opened lazily and retried.</summary>
+    public static RetryingEnforcementBackend ForWfp() => new(() => new WfpEnforcementBackend());
+
+    /// <summary>How many times opening has been tried and failed since the last success.</summary>
+    public int FailedOpens { get; private set; }
+
+    private IEnforcementBackend? TryOpen()
+    {
+        lock (_lock)
+        {
+            if (_inner is not null)
+            {
+                return _inner;
+            }
+            try
+            {
+                _inner = _open();
+                _reason = null;
+                FailedOpens = 0;
+            }
+            catch (Exception ex)
+            {
+                _reason = WfpSession.DescribeOpenFailure(ex);
+                FailedOpens++;
+            }
+            return _inner;
+        }
+    }
+
+    public bool IsAvailable => _inner is not null;
+    public string? UnavailableReason => _inner is null ? _reason ?? "Network policy is unavailable." : null;
+    public bool RedirectionAvailable => _inner?.RedirectionAvailable ?? false;
+
+    public BackendApplyResult Apply(EnforcementPlan plan)
+        => TryOpen()?.Apply(plan) ?? BackendApplyResult.Success;
+
+    public string? ApplyRedirect(RedirectPlan plan) => _inner?.ApplyRedirect(plan);
+
+    public string FixRouteTie(RouteTie tie, NetworkAdapter preferred)
+        => _inner?.FixRouteTie(tie, preferred) ?? throw new NotSupportedException(UnavailableReason);
+
+    public void EmergencyDisable() => _inner?.EmergencyDisable();
+
+    public void Dispose()
+    {
+        lock (_lock)
+        {
+            _inner?.Dispose();
+            _inner = null;
+        }
+    }
 }

@@ -19,14 +19,25 @@ public sealed class NoConnectionHistory : IConnectionHistory
 /// Where each app has been talking to, with names rather than bare addresses.
 ///
 /// <para>Portmaster's live connection list is the thing its users praise most, and the live view
-/// here already shows what is connected right now — this keeps the recent past as well, so
-/// "what did that app talk to while I was away" has an answer. Names come from reverse DNS,
-/// looked up once per address in the background and cached, because a list of raw IPv6 addresses
-/// tells nobody anything. The cache is capped, only a few lookups run at once, and a failed one is
-/// not asked again for a while, so a dead resolver costs a trickle of timeouts rather than a flood.</para>
+/// here already shows what is connected right now. This keeps the recent past as well, so
+/// "what did that app talk to while I was away" has an answer.</para>
+///
+/// <para><b>What leaves the machine, exactly.</b> Recording is local: it reads this PC's connection
+/// table and keeps the result in memory. Names are the only thing that touches the network, and
+/// they do: a reverse-DNS (PTR) query for an address goes to the DNS server Windows uses, which
+/// means that server (and so your ISP, if it is the resolver) can see which addresses were asked
+/// about. To keep that to the minimum, an address is looked up only when someone asks for the
+/// history (the History panel being open), only for the addresses in the list being returned, once
+/// each (failures are not retried for a while), and never for addresses on your own network. With
+/// the panel closed there are no lookups at all. The cache is capped and only a few lookups run at
+/// once, so a dead resolver costs a trickle of timeouts rather than a flood.</para>
+///
+/// <para>Recording itself is cheap-ish but not free (it snapshots every socket), so it samples every
+/// <see cref="BusyInterval"/> while the history is being looked at and every <see cref="IdleInterval"/>
+/// otherwise: the past stays available, but a PC nobody is looking at is not polled every five seconds.</para>
 ///
 /// <para>It lives in memory and starts empty when the service restarts: it is a window on what is
-/// happening, not a log to be kept, and nothing about it leaves the machine.</para>
+/// happening, not a log to be kept.</para>
 /// </summary>
 public sealed class ConnectionHistory(
     IConnectionSource connections,
@@ -42,12 +53,22 @@ public sealed class ConnectionHistory(
     /// <summary>How long a failed lookup is believed before it is tried again.</summary>
     public static readonly TimeSpan FailureTtl = TimeSpan.FromMinutes(15);
 
+    /// <summary>Sampling period while someone has looked at the history recently.</summary>
+    public static readonly TimeSpan BusyInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>Sampling period when nobody has: enough to have a past to show, little enough to be unnoticeable.</summary>
+    public static readonly TimeSpan IdleInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>How long after the last request the history counts as being looked at.</summary>
+    public static readonly TimeSpan BusyFor = TimeSpan.FromMinutes(2);
+
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Func<IPAddress, CancellationToken, Task<string>> _resolve =
         resolve ?? (async (address, ct) => (await Dns.GetHostEntryAsync(address.ToString(), ct)).HostName);
     private readonly ConcurrentDictionary<(string App, string Address), Entry> _seen = new();
     private readonly ConcurrentDictionary<string, NameEntry> _names = new();
     private int _lookupsInFlight;
+    private long _askedAtTicks = long.MinValue;   // UTC ticks of the last Recent() call
 
     /// <summary>An empty name means no answer; Pending marks a lookup under way.</summary>
     private sealed record NameEntry(string Name, DateTimeOffset At, bool Pending = false);
@@ -73,9 +94,16 @@ public sealed class ConnectionHistory(
             {
                 logger.LogWarning(ex, "Recording connections failed.");
             }
-            await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            await Task.Delay(NextInterval(), stoppingToken);
         }
     }
+
+    /// <summary>True while the history has been asked for recently, so there is a reader.</summary>
+    public bool BeingRead => Volatile.Read(ref _askedAtTicks) is var at && at != long.MinValue
+                             && _time.GetUtcNow().UtcTicks - at < BusyFor.Ticks;
+
+    /// <summary>How long to wait before the next sample.</summary>
+    public TimeSpan NextInterval() => BeingRead ? BusyInterval : IdleInterval;
 
     public void Record()
     {
@@ -91,7 +119,6 @@ public sealed class ConnectionHistory(
                 _ => new Entry(connection.ProcessName, address, connection.InterfaceName, connection.Protocol, now));
             entry.Last = now;
             entry.Count++;
-            Name(endpoint.Address);
         }
 
         // Keep the window small; the oldest go first.
@@ -129,7 +156,8 @@ public sealed class ConnectionHistory(
 
     /// <summary>
     /// Looks a name up once per address, in the background, and remembers the answer. Past the
-    /// lookup limit an address is simply left alone until a later pass, rather than queued.
+    /// lookup limit an address is simply left alone until a later request, rather than queued.
+    /// Only ever called for addresses a reader is about to see.
     /// </summary>
     private void Name(IPAddress address)
     {
@@ -170,9 +198,24 @@ public sealed class ConnectionHistory(
     }
 
     public IReadOnlyList<ConnectionHistoryDto> Recent(int limit)
-        => _seen.Values
+    {
+        Interlocked.Exchange(ref _askedAtTicks, _time.GetUtcNow().UtcTicks);
+        var shown = _seen.Values
             .OrderByDescending(e => e.Last)
             .Take(Math.Clamp(limit, 1, Keep))
+            .ToList();
+
+        // Names are fetched for what is being shown and nothing else; the answers arrive for the
+        // reader's next request. Until then the address stands in for the name.
+        foreach (var address in shown.Select(e => e.Address).Distinct())
+        {
+            if (IPAddress.TryParse(address, out var parsed))
+            {
+                Name(parsed);
+            }
+        }
+
+        return shown
             .Select(e => new ConnectionHistoryDto(
                 e.App,
                 _names.TryGetValue(e.Address, out var known) && known.Name.Length > 0 ? known.Name : e.Address,
@@ -183,4 +226,5 @@ public sealed class ConnectionHistory(
                 e.Last,
                 e.Count))
             .ToList();
+    }
 }

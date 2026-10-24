@@ -119,6 +119,12 @@ public sealed class SetupOptions
     public bool StartWithWindows = true;
     public bool DesktopShortcut;
     public bool RemoveSettings;
+
+    /// <summary>
+    /// Remove NetRoute even though Windows' network settings could not be confirmed as put back.
+    /// Off by default, because removal deletes the only program that could put them back.
+    /// </summary>
+    public bool Force;
 }
 
 /// <summary>A failure whose message is written for the person running setup.</summary>

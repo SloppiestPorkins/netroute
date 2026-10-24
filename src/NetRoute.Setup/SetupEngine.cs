@@ -30,6 +30,22 @@ internal sealed class SetupEngine
     public bool RestartNeeded { get; private set; }
     public bool RolledBack { get; private set; }
 
+    private RestoreOutcome _restore = RestoreOutcome.NothingToRestore;
+    private string _deferredSelfDelete;
+
+    /// <summary>
+    /// True when a removal finished but Windows' network settings could not be confirmed as put
+    /// back. The run is not a success: the person is left with NetRoute's metrics in place and no
+    /// NetRoute to undo them, so this has to reach both the window and the exit code.
+    /// </summary>
+    public bool RestoreIncomplete => _restore == RestoreOutcome.Failed;
+
+    /// <summary>How to put the settings back by hand, for when <see cref="RestoreIncomplete"/>.</summary>
+    public string RestoreAdvice => RestorePolicy.ManualInstructions(Machine.RouteStatePath);
+
+    /// <summary>What the rollback managed to undo, in the person's words, or null if none ran.</summary>
+    public string RollbackSummary { get; private set; }
+
     public static List<StepItem> InstallSteps() => new List<StepItem>
     {
         new StepItem("Unpacking NetRoute"),
@@ -57,9 +73,14 @@ internal sealed class SetupEngine
         var dir = Machine.InstallDir;
         var staging = dir + ".new";
         var backup = dir + ".old";
-        var hadInstall = File.Exists(Machine.ServiceExe);
-        var serviceWasRunning = false;
-        var filesChanged = false;
+        // What this run did, which is all a rollback needs to know. A fresh install that fails has
+        // to leave a clean machine; an update that fails has to leave the old version working.
+        var facts = new RollbackFacts
+        {
+            HadInstall = File.Exists(Machine.ServiceExe),
+            ServiceCreated = Machine.Status(Machine.ServiceName) == null,
+            DriverCreated = Machine.Status(Machine.DriverService) == null
+        };
 
         Do(steps[0], () =>
         {
@@ -73,14 +94,14 @@ internal sealed class SetupEngine
             Do(steps[1], () =>
             {
                 var closed = CloseApp();
-                serviceWasRunning = StopService(Machine.ServiceName);
+                facts.ServiceWasRunning = StopService(Machine.ServiceName);
                 progress(0.5);
-                if (!serviceWasRunning && closed == 0)
+                if (!facts.ServiceWasRunning && closed == 0)
                 {
                     steps[1].State = StepState.Skipped;
                     return "Nothing was running.";
                 }
-                return serviceWasRunning
+                return facts.ServiceWasRunning
                     ? "Stopped the service. Windows' network settings are back to normal until it restarts."
                     : "Closed the NetRoute app.";
             });
@@ -91,8 +112,9 @@ internal sealed class SetupEngine
                 if (Directory.Exists(dir))
                 {
                     CopyTree(dir, backup);
+                    facts.BackupExists = true;
                 }
-                filesChanged = true;
+                facts.FilesChanged = true;
                 CopyTree(staging, dir);
                 RemoveExtraFiles(dir, staging);
                 progress(0.72);
@@ -112,7 +134,8 @@ internal sealed class SetupEngine
         }
         catch (Exception)
         {
-            RollBack(filesChanged, serviceWasRunning, dir, backup);
+            facts.DaemonsTurnedOff = Machine.ReadStates("Service.").Any();
+            RollBack(facts, dir, backup);
             DeleteTree(staging);
             throw;
         }
@@ -153,36 +176,167 @@ internal sealed class SetupEngine
         });
     }
 
-    /// <summary>Puts the previous version back and restarts it, after a failed update.</summary>
-    private void RollBack(bool filesChanged, bool serviceWasRunning, string dir, string backup)
+    /// <summary>
+    /// Undoes what this run managed to do: the previous version put back and restarted after a
+    /// failed update, or a clean machine after a failed fresh install.
+    ///
+    /// <para>What to undo is decided by <see cref="RollbackPlan"/> from facts alone, so the rule
+    /// can be checked without a machine to damage. Each step is attempted on its own, because a
+    /// step that cannot be done must not stop the ones after it -- the point is to get as close to
+    /// where we started as possible, and then say how close that was.</para>
+    /// </summary>
+    private void RollBack(RollbackFacts facts, string dir, string backup)
     {
         _log.Write("== Rolling back");
-        try
+        var done = new List<string>();
+        var failed = new List<string>();
+
+        foreach (var step in RollbackPlan.For(facts))
         {
-            if (filesChanged && Directory.Exists(backup))
+            try
             {
+                var said = Undo(step, dir, backup);
+                if (said != null)
+                {
+                    done.Add(said);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Write("   Rollback problem at " + step + ": " + ex);
+                failed.Add(Describe(step));
+            }
+        }
+
+        RollbackSummary = Summarise(facts.HadInstall, done, failed);
+        _log.Write("   " + RollbackSummary);
+    }
+
+    private string Undo(RollbackStep step, string dir, string backup)
+    {
+        switch (step)
+        {
+            case RollbackStep.StopNewService:
+                // A new version that started and then failed is holding its own files open.
                 try
                 {
-                    StopService(Machine.ServiceName);   // a new version that started and then failed
+                    StopService(Machine.ServiceName);
                 }
                 catch (SetupException ex)
                 {
                     _log.Write("   " + ex.Message);
                 }
+                return null;
+
+            case RollbackStep.RestoreOldFiles:
+                if (!Directory.Exists(backup))
+                {
+                    return null;
+                }
                 CopyTree(backup, dir);
                 RemoveExtraFiles(dir, backup);
                 DeleteTree(backup);
                 RolledBack = true;
-            }
-            if (serviceWasRunning)
-            {
+                return "put the previous version back";
+
+            case RollbackStep.DeleteNewFiles:
+                // Nothing was here before this run, so leaving half an install behind would be
+                // worse than leaving nothing: the next attempt would see an install to update.
+                DeleteInstallFolder(dir);
+                Machine.RemoveFromPath(dir);
+                Machine.DeleteFile(Machine.StartMenuLink);
+                Machine.DeleteFile(Machine.StartupLink);
+                Machine.DeleteFile(Machine.DesktopLink);
+                return "removed the files it had copied";
+
+            case RollbackStep.DeleteServiceWeCreated:
+                if (Machine.Status(Machine.ServiceName) != null)
+                {
+                    Sc($"delete {Machine.ServiceName}");
+                }
+                return "unregistered the service it had created";
+
+            case RollbackStep.RemoveDriverWeCreated:
+                // Never stopped, only unregistered: unloading it while it holds state is a
+                // deliberate bugcheck. See the notes on this class.
+                if (Machine.Status(Machine.DriverService) != null)
+                {
+                    Sc($"delete {Machine.DriverService}");
+                    RestartNeeded = true;
+                }
+                Machine.DeleteState("DriverCreated");
+                Machine.DeleteState("DriverStart");
+                return "unregistered the split-tunnel driver it had registered";
+
+            case RollbackStep.ReenableMullvadDaemons:
+                foreach (var entry in Machine.ReadStates("Service."))
+                {
+                    var name = entry.Key.Substring("Service.".Length);
+                    if (!string.IsNullOrEmpty(entry.Value))
+                    {
+                        Machine.Run(Machine.Sc, $"config {name} start= {StartFlag(entry.Value)}", _log, out _, 30000);
+                    }
+                    Machine.DeleteState(entry.Key);
+                }
+                return "turned Mullvad VPN's services back on";
+
+            case RollbackStep.ForgetSetupState:
+                using (var hklm = Machine.Hklm())
+                {
+                    hklm.DeleteSubKeyTree(@"SOFTWARE\NetRoute", false);
+                    hklm.DeleteSubKeyTree(Machine.UninstallKeyPath, false);
+                }
+                return null;
+
+            case RollbackStep.RestoreRecoveryActions:
+                // StopService strips these so a restarting service cannot hold its files open
+                // mid-copy. Normally RegisterService puts them back at the end of the install --
+                // which never happened, so the old service would never restart itself again.
+                if (Machine.Status(Machine.ServiceName) != null)
+                {
+                    Sc($"failure {Machine.ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000");
+                }
+                return "restored the service's restart settings";
+
+            case RollbackStep.RestartOldService:
                 StartService(Machine.ServiceName);
-            }
+                return "started it again";
+
+            default:
+                return null;
         }
-        catch (Exception ex)
+    }
+
+    private static string StartFlag(string startMode)
+        => string.Equals(startMode, "Automatic", StringComparison.OrdinalIgnoreCase) ? "auto"
+            : string.Equals(startMode, "Disabled", StringComparison.OrdinalIgnoreCase) ? "disabled"
+            : "demand";
+
+    private static string Describe(RollbackStep step) => step switch
+    {
+        RollbackStep.RestoreOldFiles => "putting the previous version back",
+        RollbackStep.DeleteNewFiles => "removing the files it had copied",
+        RollbackStep.DeleteServiceWeCreated => "unregistering the service",
+        RollbackStep.RemoveDriverWeCreated => "unregistering the split-tunnel driver",
+        RollbackStep.ReenableMullvadDaemons => "turning Mullvad VPN's services back on",
+        RollbackStep.RestoreRecoveryActions => "restoring the service's restart settings",
+        RollbackStep.RestartOldService => "starting the previous version again",
+        _ => step.ToString()
+    };
+
+    /// <summary>
+    /// Says what state the machine was left in. Never claims more than was done: a rollback that
+    /// could not finish is the case where someone has to be told, not reassured.
+    /// </summary>
+    private static string Summarise(bool hadInstall, List<string> done, List<string> failed)
+    {
+        var where = hadInstall ? "Your previous version was left in place." : "Nothing was left installed.";
+        if (failed.Count > 0)
         {
-            _log.Write("   Rollback problem: " + ex);
+            return "Undoing the attempt did not finish: " + string.Join(", ", failed)
+                   + " could not be done. Run setup again, and choose Repair if NetRoute is still listed.";
         }
+        return done.Count == 0 ? where : "Undone: " + string.Join(", ", done) + ". " + where;
     }
 
     private string SetUpDriver(SetupOptions options, StepItem step)
@@ -270,14 +424,25 @@ internal sealed class SetupEngine
     private void RegisterService()
     {
         var binPath = $"binPath= \"\\\"{Machine.ServiceExe}\\\"\"";
+
+        // Every filter NetRoute installs goes through the Base Filtering Engine, so starting
+        // before it is up means enforcement is simply off until something restarts us. Depending
+        // on it is how WFP consumers are meant to be registered. The trade is that stopping BFE
+        // now stops NetRoute too, and the Service Control Manager does not treat that as a
+        // failure, so the restart actions below will not bring it back -- but BFE is a core
+        // always-on service, and dead-at-boot is the worse of the two failures. The service also
+        // retries opening the engine on its own, so a late BFE no longer latches enforcement off.
+        const string dependsOnBfe = "depend= BFE";
+
         if (Machine.Status(Machine.ServiceName) == null)
         {
-            Sc($"create {Machine.ServiceName} {binPath} start= auto DisplayName= \"NetRoute\"");
+            Sc($"create {Machine.ServiceName} {binPath} start= auto {dependsOnBfe} DisplayName= \"NetRoute\"");
             Sc($"description {Machine.ServiceName} \"Keeps your apps on the network you chose.\"");
         }
         else
         {
-            Sc($"config {Machine.ServiceName} {binPath} start= auto");
+            // Named on an update too, so installs made before this existed pick it up.
+            Sc($"config {Machine.ServiceName} {binPath} start= auto {dependsOnBfe}");
         }
         Sc($"failure {Machine.ServiceName} reset= 86400 actions= restart/5000/restart/5000/restart/5000");
     }
@@ -318,18 +483,48 @@ internal sealed class SetupEngine
         Do(steps[1], () =>
         {
             progress(0.35);
-            if (!File.Exists(Machine.CliExe))
+
+            // Whether this worked decides whether the removal may go on at all: the next steps
+            // delete the only program that could put these settings back. So the outcome is
+            // judged on evidence -- the program existed, it was asked, it returned 0, and it
+            // cleared the state it had just used -- rather than on it saying so (finding 6).
+            var cliExists = File.Exists(Machine.CliExe);
+            var stateBefore = File.Exists(Machine.RouteStatePath);
+            int? code = null;
+            string output = null;
+            if (cliExists)
+            {
+                // Resets the driver and restores Windows' default connection even if the service
+                // crashed instead of shutting down, and removes NetRoute's WFP sublayers.
+                code = Machine.Run(Machine.CliExe, "cleanup-driver --remove-sublayers", _log, out output);
+            }
+
+            _restore = RestorePolicy.Decide(cliExists, stateBefore, code, File.Exists(Machine.RouteStatePath));
+
+            if (_restore == RestoreOutcome.NothingToRestore)
             {
                 steps[1].State = StepState.Skipped;
                 return "Nothing to restore.";
             }
-            // Resets the driver and restores Windows' default connection even if the service
-            // crashed instead of shutting down, and removes NetRoute's WFP sublayers.
-            if (Machine.Run(Machine.CliExe, "cleanup-driver --remove-sublayers", _log, out var output) != 0)
+            if (_restore == RestoreOutcome.Restored)
             {
-                return Warn(steps[1], "Some network settings couldn't be put back: " + LastLine(output));
+                return "Windows' default connection is back to how it was, and app moving is off.";
             }
-            return "Windows' default connection is back to how it was, and app moving is off.";
+
+            var why = code.HasValue && code.Value != 0 ? ": " + LastLine(output)
+                : !cliExists ? ": NetRoute's command line is missing, so nothing could undo them"
+                : ": NetRoute's record of the original settings is still there afterwards";
+
+            if (!RestorePolicy.MayContinue(_restore, options.Force))
+            {
+                // Stop here, with everything still in place, rather than removing the means of
+                // recovery. /force says to carry on regardless.
+                throw new SetupException(
+                    "Windows' network settings couldn't be put back" + why + ". Nothing has been removed, so you can try again. "
+                    + RestorePolicy.ManualInstructions(Machine.RouteStatePath)
+                    + " To remove NetRoute anyway, run the uninstaller with /force.");
+            }
+            return Warn(steps[1], "Some network settings couldn't be put back" + why + ". Removal is continuing because /force was given.");
         });
 
         Do(steps[2], () =>
@@ -363,14 +558,21 @@ internal sealed class SetupEngine
                 hklm.DeleteSubKeyTree(Machine.UninstallKeyPath, false);
                 hklm.DeleteSubKeyTree(@"SOFTWARE\NetRoute", false);
             }
-            if (options.RemoveSettings)
+            // Never while the restore is unconfirmed: route-state.json lives here, and it is the
+            // record of what the settings were before NetRoute touched them. Deleting it would
+            // take away the only way back.
+            var keepRecord = RestoreIncomplete;
+            if (options.RemoveSettings && !keepRecord)
             {
                 DeleteTree(Machine.DataDir);
                 DeleteTree(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NetRoute"));
             }
             progress(1);
-            return (options.RemoveSettings ? "Removed, with your settings." : "Removed. Your settings are kept in " + Machine.DataDir + ".")
-                   + (RestartNeeded ? " A restart finishes removing the driver file." : "");
+            var settings = keepRecord
+                ? "Removed, but your network settings were not confirmed as put back, so NetRoute's record of them has been kept in " + Machine.DataDir + "."
+                : options.RemoveSettings ? "Removed, with your settings."
+                : "Removed. Your settings are kept in " + Machine.DataDir + ".";
+            return settings + (RestartNeeded ? " A restart finishes removing the driver file." : "");
         });
     }
 
@@ -423,6 +625,41 @@ internal sealed class SetupEngine
         }
     }
 
+    /// <summary>
+    /// Starts the script that removes the uninstaller's own file once this process has gone. Called
+    /// after the work is finished, from whichever path ends the process, and does nothing when
+    /// there was no file left behind.
+    /// </summary>
+    public void FinishDeferredDeletes()
+    {
+        if (_deferredSelfDelete == null)
+        {
+            return;
+        }
+        try
+        {
+            var script = Path.Combine(Path.GetTempPath(), "NetRoute-Tidy-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".cmd");
+            File.WriteAllText(script, SelfDelete.Script(_deferredSelfDelete, Path.GetDirectoryName(_deferredSelfDelete), script));
+            using (Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), "/c \"" + script + "\"")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }))
+            {
+            }
+        }
+        catch (Exception ex)
+        {
+            // Nothing the person needs to act on: a stray uninstaller in Program Files is untidy,
+            // not broken, and saying so at the end of a successful removal would only confuse.
+            _log.Write("   Could not start the tidy-up script: " + ex.Message);
+        }
+        finally
+        {
+            _deferredSelfDelete = null;
+        }
+    }
+
     private void DeleteInstallFolder(string dir)
     {
         if (!Directory.Exists(dir))
@@ -438,7 +675,16 @@ internal sealed class SetupEngine
             }
             catch (Exception)
             {
-                // In use: the loaded driver, most likely.
+                // The one file we know will still be running is this uninstaller's original copy,
+                // when a /quiet run is waiting on the relocated one for its exit code. Queueing
+                // that for the next restart would make the run report "restart needed" for a file
+                // nobody is waiting on, so it gets a script that tidies it up straight after.
+                if (SelfDelete.IsLeftToWaitingParent(file, Machine.UninstallerExe))
+                {
+                    _deferredSelfDelete = file;
+                    continue;
+                }
+                // Anything else in use is the loaded driver, most likely.
                 if (Machine.DeleteAtRestart(file))
                 {
                     RestartNeeded = true;

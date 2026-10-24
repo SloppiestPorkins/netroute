@@ -1,3 +1,4 @@
+#if DEBUG   // Invented data for screenshots: it must not ship inside the release exe.
 using NetRoute.Core.Adapters;
 using NetRoute.Core.Policy;
 using NetRoute.Core.Traffic;
@@ -332,3 +333,5 @@ public sealed class DemoNetRouteClient : INetRouteClient
         Gateways = [], DnsServers = [], InterfaceIndex = (uint)luid, Selectable = selectable
     };
 }
+
+#endif

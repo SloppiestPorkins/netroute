@@ -21,14 +21,23 @@ public sealed class WfpException : Exception
         ErrorCode = errorCode;
     }
 
+    /// <summary>What this failure means for the user's protection, appended to <see cref="FriendlyMessage"/>.</summary>
+    public string? Consequence { get; init; }
+
+    /// <summary>The same failure, with what it leaves unprotected spelled out.</summary>
+    public WfpException WithConsequence(string consequence) => new(Operation, ErrorCode) { Consequence = consequence };
+
     /// <summary>Plain-language explanation suitable for showing directly to a user.</summary>
-    public string FriendlyMessage => ErrorCode switch
+    public string FriendlyMessage => Consequence is null ? Reason : $"{Reason} {Consequence}";
+
+    private string Reason => ErrorCode switch
     {
         FWP_E_ALREADY_EXISTS => "This rule already exists.",
         ERROR_ACCESS_DENIED => "NetRoute needs administrator rights to change network policy.",
         FWP_E_NOT_FOUND => "The rule NetRoute tried to change no longer exists.",
         FWP_E_TIMEOUT => "Windows did not respond in time. Try again.",
         FWP_E_INVALID_PARAMETER => "NetRoute could not apply this rule to your network configuration.",
+        FWP_E_WRONG_SESSION => "Another copy of NetRoute is already managing network policy.",
         _ => "We couldn't apply this rule."
     };
 
@@ -38,6 +47,11 @@ public sealed class WfpException : Exception
     public const uint FWP_E_TIMEOUT = 0x80320005;
     public const uint FWP_E_INVALID_PARAMETER = 0x80320035;
 
+    /// <summary>The object being changed belongs to another session (typically another live NetRoute).</summary>
+    public const uint FWP_E_WRONG_SESSION = 0x8032000C;
+    public const uint RPC_S_SERVER_UNAVAILABLE = 1722;
+    public const uint EPT_S_NOT_REGISTERED = 1753;
+
     private static string Describe(uint code) => code switch
     {
         ERROR_ACCESS_DENIED => "ERROR_ACCESS_DENIED",
@@ -45,6 +59,7 @@ public sealed class WfpException : Exception
         FWP_E_NOT_FOUND => "FWP_E_NOT_FOUND",
         FWP_E_TIMEOUT => "FWP_E_TIMEOUT",
         FWP_E_INVALID_PARAMETER => "FWP_E_INVALID_PARAMETER",
+        FWP_E_WRONG_SESSION => "FWP_E_WRONG_SESSION",
         _ => new Win32Exception((int)code).Message
     };
 

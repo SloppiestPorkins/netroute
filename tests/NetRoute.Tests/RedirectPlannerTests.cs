@@ -62,15 +62,19 @@ public class RedirectPlannerTests
         Assert.Contains("Ethernet", redirect.Reason);
     }
 
+    /// <summary>
+    /// Changed from the old behaviour, which asserted ManageDefaultRoute with no Gaming app at all.
+    /// That rewrote Windows' metrics for a user who had asked NetRoute to do nothing to them.
+    /// </summary>
     [Fact]
-    public void NoGamingAppsMeansNothingToSplit()
+    public void NoGamingAppsMeansNothingToSplitAndWindowsRoutingIsLeftAlone()
     {
         var (config, _, adapters) = Scenario();
         config = config with { AppRules = config.AppRules.Where(r => r.Role != RoleId.Gaming).ToList() };
         var plan = new PolicyResolver(new Fake(adapters)).Resolve(config);
 
         var redirect = RedirectPlanner.Build(config, plan, adapters);
-        Assert.True(redirect.ManageDefaultRoute);
+        Assert.False(redirect.ManageDefaultRoute);
         Assert.False(redirect.Split);
     }
 
@@ -120,8 +124,11 @@ public class RedirectPlannerTests
         Assert.False(SplitImagePaths.IsSafeRoot(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)));
         Assert.False(SplitImagePaths.IsSafeRoot(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)));
 
-        var curl = SplitImagePaths.For(AppIdentity.ForExecutable(@"C:\Windows\System32\curl.exe"));
-        Assert.Equal(@"C:\Windows\System32\curl.exe", Assert.Single(curl), ignoreCase: true);
+        // A real file in a system folder, made here rather than assumed to ship with this Windows.
+        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var exe = Directory.EnumerateFiles(system, "*.exe").First();
+        var lone = SplitImagePaths.For(AppIdentity.ForExecutable(exe));
+        Assert.Equal(exe, Assert.Single(lone), ignoreCase: true);
     }
 
     // ---- helpers ----

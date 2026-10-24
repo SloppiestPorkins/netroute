@@ -25,7 +25,17 @@ internal static class Program
             case "wfp-or":
                 return await WfpOrProof.RunAsync();
             case "wfp-measure":
-                return WfpMeasureProof.Run(args.ElementAtOrDefault(1) switch { "collapse" => true, "split" => false, _ => null });
+            {
+                var mode = args.ElementAtOrDefault(1);
+                if (mode is not ("split" or "collapse"))
+                {
+                    Console.WriteLine("Usage: netroute-poc wfp-measure split|collapse");
+                    Console.WriteLine("  split    one filter per program file (what NetRoute ships today)");
+                    Console.WriteLine("  collapse one filter per layer holding every program file (only meaningful if 'wfp-or' printed OR CONFIRMED)");
+                    return 2;
+                }
+                return WfpMeasureProof.Run(mode == "collapse");
+            }
             case "apps":
                 return await AppDiscoveryProof.RunAsync();
             case "split":

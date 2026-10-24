@@ -10,6 +10,8 @@
     <UseWindowsForms>true</UseWindowsForms>
     <Product>NetRoute</Product>
     <ApplicationIcon>..\..\assets\netroute.ico</ApplicationIcon>
+    <!-- Declares per-monitor DPI awareness; the reason is in the manifest. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>

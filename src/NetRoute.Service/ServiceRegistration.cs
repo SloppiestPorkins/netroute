@@ -18,21 +18,9 @@ public static class ServiceRegistration
     {
         services.AddSingleton<IAdapterSource, AdapterDiscovery>();
         services.AddSingleton<IDefaultRouteSource, DefaultRouteTable>();
-        services.AddSingleton<IEnforcementBackend>(_ =>
-        {
-            if (!WfpSession.CanOpen(out var reason))
-            {
-                return new NullEnforcementBackend(reason);
-            }
-            try
-            {
-                return new WfpEnforcementBackend();
-            }
-            catch (Exception ex)
-            {
-                return new NullEnforcementBackend(ex.Message);
-            }
-        });
+        // Opened now if possible, and retried by the engine's apply backoff if not (BFE not up yet,
+        // or another copy of NetRoute enforcing). See RetryingEnforcementBackend.
+        services.AddSingleton<IEnforcementBackend>(_ => RetryingEnforcementBackend.ForWfp());
 
         // Observed traffic: what makes "Verified" mean something, and feeds the live view.
         services.AddSingleton(sp => new NetRoute.Windows.Traffic.TrafficObserver(sp.GetRequiredService<IAdapterSource>()));

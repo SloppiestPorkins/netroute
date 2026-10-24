@@ -60,6 +60,9 @@ internal static class WfpOrProof
         try
         {
             Console.WriteLine("=== WFP SAME-FIELD CONDITION PROOF ===");
+            Console.WriteLine("Question: does one WFP filter with two ALE_APP_ID conditions match EITHER program (OR) or only a program that is both (AND)?");
+            Console.WriteLine("Answer line to look for at the end:  'OR CONFIRMED' (safe to collapse)  or  'AND' (never collapse).");
+            Console.WriteLine("Runs beside a running NetRoute service: its filters use a separate provider and sublayer.");
             Console.WriteLine();
             Console.WriteLine("Baseline, no filters:");
             var baseline = await Probe(a, b, c);
@@ -74,6 +77,12 @@ internal static class WfpOrProof
             var collapsed = await RunMode("one filter per layer, every file as a condition", collapse: true, covered, a, b, c);
 
             Console.WriteLine();
+            if (control.Failures > 0 || control.Filters == 0 || collapsed.Failures > 0 || collapsed.Filters == 0)
+            {
+                // A filter the engine refused to install blocks nothing, which would read as "AND" below. It is not an answer.
+                Console.WriteLine("  INCONCLUSIVE - a run installed no filters or reported a failure (see FAILED lines above). If the collapsed run was refused by the engine, that itself means do NOT collapse; otherwise fix the failure and re-run.");
+                return 1;
+            }
             if (!control.BlocksBoth || control.OutsiderBlocked)
             {
                 Console.WriteLine("  INCONCLUSIVE - the control did not behave (it must block both covered programs and not the outsider), so the comparison means nothing.");
@@ -106,13 +115,14 @@ internal static class WfpOrProof
         }
     }
 
-    private sealed record Mode(int Filters, TimeSpan Commit, bool BlocksBoth, bool BlocksAny, bool OutsiderBlocked);
+    private sealed record Mode(int Filters, TimeSpan Commit, bool BlocksBoth, bool BlocksAny, bool OutsiderBlocked, int Failures);
 
     private static async Task<Mode> RunMode(string label, bool collapse, string covered, string a, string b, string c)
     {
         Console.WriteLine();
         Console.WriteLine($"{label}:");
-        using var session = WfpSession.Open();
+        using var session = WfpSession.Open(PocIdentities.Or);
+        PocIdentities.ReportCoexistence(session);
         var enforcer = new WfpEnforcer(session, new AdapterDiscovery(), collapse);
 
         var rule = AppRule.Create(AppIdentity.ForFolder(covered, "wfp-or proof"), RoleId.Gaming);
@@ -146,7 +156,7 @@ internal static class WfpOrProof
 
         var blockedA = !probes[0].Reached;
         var blockedB = !probes[1].Reached;
-        return new Mode(ownFilters, result.CommitTime, blockedA && blockedB, blockedA || blockedB, !probes[2].Reached);
+        return new Mode(ownFilters, result.CommitTime, blockedA && blockedB, blockedA || blockedB, !probes[2].Reached, result.Failed.Count);
     }
 
     private sealed record Reach(string Name, bool Reached);

@@ -175,31 +175,15 @@ public partial class MainViewModel : ObservableObject
         Paused = status.EnforcementPaused;
 
         var apps = status.Apps;
-        if (status.EnforcementPaused)
+        var (headerText, headerTone) = StatusWording.Header(status);
+        var (headerBrush, headerTint) = headerTone switch
         {
-            SetOverall(status.PausedUntil is { } until ? $"Paused until {until.ToLocalTime():HH:mm}" : "Paused", "MutedBrush", "NeutralTintBrush");
-        }
-        else if (!status.EnforcementActive)
-        {
-            SetOverall("Needs attention", "WarnBrush", "WarnTintBrush");
-        }
-        else if (status.Headline() is { } headline)
-        {
-            // Said as a count: the other rules are installed and working, so this is not "off".
-            SetOverall(headline, "WarnBrush", "WarnTintBrush");
-        }
-        else if (apps.Any(a => a.Verification is VerificationState.Leak))
-        {
-            SetOverall("Leak detected", "BadBrush", "BadTintBrush");
-        }
-        else if (apps.Any(a => a.Verification is VerificationState.Blocked))
-        {
-            SetOverall("Blocked", "BadBrush", "BadTintBrush");
-        }
-        else
-        {
-            SetOverall("Protected", "GoodBrush", "GoodTintBrush");
-        }
+            Tone.Good => ("GoodBrush", "GoodTintBrush"),
+            Tone.Warn => ("WarnBrush", "WarnTintBrush"),
+            Tone.Bad => ("BadBrush", "BadTintBrush"),
+            _ => ("MutedBrush", "NeutralTintBrush")
+        };
+        SetOverall(headerText, headerBrush, headerTint);
 
         var banners = new List<string>();
         if (status.Summary() is { } failures)
@@ -212,8 +196,7 @@ public partial class MainViewModel : ObservableObject
         }
         if (!status.RedirectionAvailable)
         {
-            banners.Add("NetRoute can keep apps off the wrong network, but can't move them onto another one yet: " +
-                        "the split-tunnel driver isn't running. Run RUN-NETROUTE-SETUP.cmd to fix this.");
+            banners.Add(StatusWording.DriverDown);
         }
         Banner = banners.Count == 0 ? null : string.Join("\n", banners);
         RouteTieText = status.RouteTie?.Message;
@@ -370,18 +353,27 @@ public partial class MainViewModel : ObservableObject
     private void SyncApps(IReadOnlyList<AppStatusDto> apps)
     {
         // Update in place so the list doesn't flicker or lose its scroll position every refresh.
-        if (Apps.Count != apps.Count || Apps.Zip(apps).Any(p => p.First.Id != p.Second.Rule.Id))
+        // The order has to be settled before the comparison: this compared the sorted rows
+        // against the service's own order, so the ids never lined up, every refresh looked
+        // like a different set of apps, and the whole list was rebuilt a second at a time.
+        // On screen that is the window jittering (24 Oct 2026).
+        var ordered = apps
+            .OrderBy(a => a.Rule.App.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        if (Apps.Count != ordered.Count || Apps.Zip(ordered).Any(p => p.First.Id != p.Second.Rule.Id))
         {
             Apps.Clear();
-            foreach (var a in apps.OrderBy(a => a.Rule.App.DisplayName, StringComparer.CurrentCultureIgnoreCase))
+            foreach (var a in ordered)
             {
                 Apps.Add(new AppRowViewModel(a));
             }
             return;
         }
-        foreach (var row in Apps)
+
+        for (var i = 0; i < ordered.Count; i++)
         {
-            row.Update(apps.First(a => a.Rule.Id == row.Id));
+            Apps[i].Update(ordered[i]);
         }
     }
 
@@ -442,7 +434,7 @@ public partial class MainViewModel : ObservableObject
         }
         if (Page == "ServiceDown")
         {
-            ShowToast("The NetRoute service didn't start. Run INSTALL-NETROUTE.cmd again to repair it.");
+            ShowToast(StatusWording.ServiceDidNotStart);
         }
     }
 
@@ -468,7 +460,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private Task TogglePause(AppRowViewModel row) => Run(
         () => _client.SetRulePausedAsync(row.Id, !row.IsPaused),
-        row.IsPaused ? $"{row.Name} is protected again." : $"{row.Name} is paused and uses normal Windows routing.");
+        row.IsPaused ? $"{row.Name} is under NetRoute's rules again." : $"{row.Name} is paused and uses normal Windows routing.");
 
     [RelayCommand]
     private void Remove(AppRowViewModel row) => Overlay = new ConfirmViewModel(
@@ -794,8 +786,7 @@ public partial class RoleCardViewModel(RoleId role) : ObservableObject
         };
 
         Note = r.Health != RoleHealth.Connected && r.AssignedApps > 0
-            ? $"{r.AssignedApps} app{(r.AssignedApps == 1 ? " is" : "s are")} set to use {Role.DisplayName()}. " +
-              "Kill Switch is stopping them from falling back to another connection."
+            ? StatusWording.RoleOfflineNote(Role, r.AssignedApps)
             : null;
     }
 }
@@ -848,6 +839,11 @@ public partial class AppRowViewModel : ObservableObject
     /// <summary>Applies the latest live reading, or clears it when the service has none.</summary>
     public void SetLive(LiveApp? live)
     {
+        _lastLive = live;
+        if (Dto is not null)
+        {
+            ApplyBadge();
+        }
         HasLive = live is not null;
         if (live is null)
         {
@@ -882,6 +878,28 @@ public partial class AppRowViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowSummary));
     }
 
+    private LiveApp? _lastLive;
+
+    /// <summary>
+    /// The badge and sentence come from <see cref="StatusWording.ForApp"/>, which only says
+    /// "Verified" once data has been seen moving on the assigned connection (§24).
+    /// </summary>
+    private void ApplyBadge()
+    {
+        var badge = StatusWording.ForApp(Dto, _lastLive);
+        Summary = badge.Summary ?? "";
+        StatusText = badge.Text;
+        var (brush, tint) = badge.Tone switch
+        {
+            Tone.Good => ("GoodBrush", "GoodTintBrush"),
+            Tone.Warn => ("WarnBrush", "WarnTintBrush"),
+            Tone.Bad => ("BadBrush", "BadTintBrush"),
+            _ => ("MutedBrush", "NeutralTintBrush")
+        };
+        StatusBrush = Ui.Res(brush);
+        StatusTint = Ui.Res(tint);
+    }
+
     public void Update(AppStatusDto dto)
     {
         Dto = dto;
@@ -894,23 +912,7 @@ public partial class AppRowViewModel : ObservableObject
         IsPaused = dto.Rule.Paused;
         PauseGlyph = IsPaused ? "" : "";
         PauseTip = IsPaused ? "Resume" : "Pause";
-        Summary = dto.Error?.FriendlyMessage ?? dto.VerificationSummary;
-
-        // Honest labels (§24): "Applied" is not "Verified".
-        var (text, brush, tint) = dto.Error is not null ? ("Problem", "WarnBrush", "WarnTintBrush")
-            : IsPaused ? ("Paused", "MutedBrush", "NeutralTintBrush")
-            : dto.Verification switch
-            {
-                VerificationState.Verified => ("Verified", "GoodBrush", "GoodTintBrush"),
-                VerificationState.Blocked => ("Blocked", "BadBrush", "BadTintBrush"),
-                VerificationState.Leak => ("Leak", "BadBrush", "BadTintBrush"),
-                VerificationState.Configured => ("Applied", "MutedBrush", "NeutralTintBrush"),
-                VerificationState.NotRunning => ("Not running", "MutedBrush", "NeutralTintBrush"),
-                _ => ("Windows routing", "MutedBrush", "NeutralTintBrush")
-            };
-        StatusText = text;
-        StatusBrush = Ui.Res(brush);
-        StatusTint = Ui.Res(tint);
+        ApplyBadge();
         OnPropertyChanged(nameof(ShowSummary));
     }
 }
@@ -929,7 +931,7 @@ public sealed record DestinationChoice(RoleId Role, string Title, string Subtitl
         [
             new(RoleId.Gaming, "Gaming", AdapterFor(RoleId.Gaming), current == RoleId.Gaming),
             new(RoleId.Downloads, "Downloads", AdapterFor(RoleId.Downloads), current == RoleId.Downloads),
-            new(RoleId.Default, "Default", "Windows decides", current == RoleId.Default)
+            new(RoleId.Default, "Default", StatusWording.DefaultSubtitle(status), current == RoleId.Default)
         ];
     }
 }
@@ -1169,7 +1171,7 @@ public partial class ChangeNetworkViewModel : ObservableObject
     public IReadOnlyList<DestinationChoice> Destinations { get; }
 
     /// <summary>
-    /// What to do when the chosen connection is down: block (the kill switch, which is the point
+    /// What to do when the chosen connection is down: block (Strict, which is the point
     /// of Strict mode) or let Windows use the other one. Blocking is the default because silently
     /// using the other connection is the failure the whole app exists to prevent.
     /// </summary>
@@ -1188,7 +1190,6 @@ public partial class ChangeNetworkViewModel : ObservableObject
             Role = destination.Role,
             Mode = destination.Role == RoleId.Default ? RoutingMode.Default
                 : FallBackWhenDown ? RoutingMode.Preferred : RoutingMode.Strict,
-            KillSwitch = !FallBackWhenDown
         };
         await _main.Run(() => _main.Client.UpdateRuleAsync(updated), $"{_app.Rule.App.DisplayName} now uses {destination.Title}.");
     }
@@ -1388,7 +1389,13 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
         {
             for (var i = 0; i < groups.Count; i++)
             {
-                Groups[i] = groups[i];
+                // Assigning the same content back rebuilds that group's rows for nothing, which
+                // is visible as a flicker once a second. A record's own equality compares the
+                // item list by reference, so the items are compared element by element.
+                if (!LiveGroup.Unchanged(Groups[i], groups[i]))
+                {
+                    Groups[i] = groups[i];
+                }
             }
         }
         else
@@ -1403,6 +1410,10 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
         var loose = connections.Count(c => c.InterfaceName is null);
         Empty = groups.Count == 0 ? "No app has network connections right now." : null;
         var notes = new List<string>();
+        if (ConnectionListNote.For(connections) is { } cut)
+        {
+            notes.Add(cut);
+        }
         if (loose > 0)
         {
             notes.Add($"{loose} more socket{(loose == 1 ? " isn't" : "s aren't")} tied to one network yet (for example UDP that hasn't sent anything), so {(loose == 1 ? "it isn't" : "they aren't")} shown.");
@@ -1452,7 +1463,21 @@ public partial class LiveViewModel(MainViewModel main) : ObservableObject
     }
 }
 
-public sealed record LiveGroup(string Title, string Subtitle, Brush Accent, string Glyph, IReadOnlyList<LiveItem> Items, string? More, int Total, double Speed);
+public sealed record LiveGroup(string Title, string Subtitle, Brush Accent, string Glyph, IReadOnlyList<LiveItem> Items, string? More, int Total, double Speed)
+{
+    /// <summary>
+    /// Whether two groups would look identical on screen. <see cref="LiveItem"/> is a record, so
+    /// its own equality is by value; only the list holding them needs comparing element by element.
+    /// </summary>
+    public static bool Unchanged(LiveGroup a, LiveGroup b)
+        => a.Title == b.Title
+           && a.Subtitle == b.Subtitle
+           && a.Glyph == b.Glyph
+           && a.More == b.More
+           && a.Total == b.Total
+           && ReferenceEquals(a.Accent, b.Accent)
+           && a.Items.SequenceEqual(b.Items);
+}
 
 /// <param name="Latency">Round trip, as text, saying which kind it is; null when not measured, so nothing is shown rather than "0 ms".</param>
 /// <param name="LatencyTip">What that figure is and isn't.</param>

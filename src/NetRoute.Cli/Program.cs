@@ -17,7 +17,7 @@ const string Usage = """
           system-downloads on|off        keep Windows Update, Store and Xbox downloads on Downloads
           pause-downloads on|off         pause download apps while a game is running
           quiet-hours <from> <to>|off    hold downloads between these hours, e.g. quiet-hours 18 23
-          selftest                       prove the separation works, end to end
+          selftest                       test that your connections work and stay apart (not NetRoute itself)
           history [days]                 how much each app used, per connection
           update [--feed <url>|--off]    check for a newer NetRoute, fetch it, and install it
           emergency-disable              remove every NetRoute rule from Windows right now
@@ -80,6 +80,11 @@ static async Task<int> RunAsync(string[] args)
                 Console.WriteLine("Quiet hours are off.");
                 break;
             case "quiet-hours" when args.Length > 2 && int.TryParse(args[1], out var from) && int.TryParse(args[2], out var to):
+                if (QuietHoursProblem(from, to) is { } problem)
+                {
+                    Console.Error.WriteLine(problem);
+                    return 1;
+                }
                 await client.SetQuietHoursAsync(from, to);
                 Console.WriteLine($"Downloads are held back between {from:00}:00 and {to:00}:00.");
                 break;
@@ -104,6 +109,20 @@ static async Task<int> RunAsync(string[] args)
     catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
 }
 
+static bool IsElevated()
+{
+    using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+    return new System.Security.Principal.WindowsPrincipal(identity).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+}
+
+/// <summary>Why these hours can't be stored as typed, or null when they can. The service clamps silently; the CLI says so instead.</summary>
+static string? QuietHoursProblem(int from, int to)
+    => from is < 0 or > 23 || to is < 0 or > 23
+        ? $"Hours run from 0 to 23, so {from} and {to} can't be used. Example: quiet-hours 18 23."
+        : from == to
+            ? "The start and end hour are the same, which would hold nothing back. Use 'quiet-hours off' to turn it off."
+            : null;
+
 /// <summary>
 /// Updates: where to look, what is there, and installing it.
 ///
@@ -114,6 +133,13 @@ static async Task<int> RunAsync(string[] args)
 static async Task<int> UpdateAsync(INetRouteClient client, string[] args)
 {
     var feed = Array.FindIndex(args, a => a is "--feed" or "-f");
+    if ((feed >= 0 || args.Contains("--off")) && !IsElevated())
+    {
+        // The service refuses these from anyone else; say so before asking it to.
+        Console.Error.WriteLine("Changing where NetRoute looks for updates needs administrator rights. Run this from an elevated prompt.");
+        Console.Error.WriteLine("'netroute update' on its own (check, fetch, install) works without them.");
+        return 1;
+    }
     if (feed >= 0 && feed + 1 < args.Length)
     {
         await client.SetUpdateSettingsAsync(args[feed + 1], automatic: !args.Contains("--manual"));

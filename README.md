@@ -24,12 +24,22 @@ someone else's. Bufferbloat. The fix isn't a bandwidth limit, it's a different l
   app's own identity (`ALE_APP_ID`, `ALE_PACKAGE_ID` for Store and Game Pass titles, and
   service SIDs via `ALE_USER_ID` for Windows Update, the Store and Xbox).
 - **Moving apps onto the right one** is Mullvad's Microsoft-signed split-tunnel driver
-  (MPL-2.0, unmodified, talked to through its device interface). Downloads is whatever
-  Windows already treats as the default route; Gaming apps are the ones the driver moves.
-- **Proving it worked** is real traffic, not configuration: NetRoute watches connections
-  and only says *Verified* once it has seen an app use the network it was put on.
-  **Prove it** goes further and measures your gaming line's latency while it pulls a real
-  download down the other one.
+  (MPL-2.0, unmodified, talked to through its device interface). Gaming apps are the ones
+  the driver moves. For that to work NetRoute makes your Downloads connection Windows'
+  default route (by lowering its IPv4 interface metric) **while at least one app is
+  assigned to Gaming**, so everything you haven't listed follows Downloads. See
+  [Honest limits](#honest-limits).
+- **Checking it worked** is observation, not configuration: NetRoute watches connections
+  and data rates, and the app only says *Verified* once it has seen data moving on the
+  network an app was put on. An open socket alone shows as *Unconfirmed*, and a rule
+  that is installed but unobserved shows as *Applied*. A connection that is down shows
+  *Held*: that is the rule in force, not a count of refused connections.
+  **Test connections** measures something different and says so: it checks that each
+  connection reaches the internet, that they are separate lines, and what a download on
+  one does to the other's latency. It uses its own sockets, so it would read the same
+  without NetRoute; only its third step looks at NetRoute's effect. The end-to-end proof
+  that a program is really moved is the harnesses in `src/NetRoute.Poc` (`split` runs a
+  real probe process under a real rule), which is what the claims above were checked with.
 
 No DLL injection, no hooking, no packet capture in the path traffic takes.
 
@@ -71,7 +81,7 @@ and rolls the old version back if anything fails. `/quiet`, `/update`, `/repair`
 ```
 netroute status                      networks, apps, and whether enforcement is on
 netroute add "Halo Infinite" gaming  route an app
-netroute selftest                    prove the separation, end to end
+netroute selftest                    test your connections (not NetRoute itself)
 netroute pause-downloads on          hold download apps while a game is running
 netroute quiet-hours 18 23           hold them in the evening whatever else is happening
 netroute update --feed <url>         where to look for a newer NetRoute
@@ -102,6 +112,21 @@ Releasing a new version is: `scripts\build-installer.ps1`, publish the exe as th
 
 ## Honest limits
 
+- **"Default" is not "Windows decides".** While any app is assigned to Gaming, NetRoute
+  lowers the Downloads connection's IPv4 metric so it wins as Windows' default route. The
+  change persists until NetRoute puts it back (uninstall, Emergency Disable, or the last
+  Gaming app removed). Anything not in a rule, a game you haven't added, Discord voice,
+  Spotify, a new browser, and name lookups, goes out of the Downloads line, including
+  while a download is saturating it. This is a consequence of the driver taking one
+  destination, so the Downloads line has to be the default. The app says so at first run
+  and on the Default choice. With no Gaming app, NetRoute leaves Windows' routing alone.
+- **Strict means held, not rerouted.** A Strict app whose connection is down is blocked
+  rather than sent elsewhere (there is no separate "kill switch" setting). Preferred mode
+  is the one that falls back to Windows routing.
+- **Connection history looks up names.** The History panel resolves the addresses it lists
+  with a reverse-DNS query to your Windows DNS server, only while it is open and never for
+  addresses on your own network. That server can see which addresses were asked about.
+  Nothing else in the history leaves the PC.
 - Apps that **host** a LAN game (Minecraft and friends) are never moved. The driver
   rewrites binds, and a server that can't bind `0.0.0.0` doesn't start. NetRoute knows
   this list and leaves them on Windows routing.

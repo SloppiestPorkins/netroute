@@ -80,7 +80,7 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
         {
             items.Add(HealthItem.Problem("NetRoute can't move apps onto another connection",
                 "The split-tunnel driver isn't running, so NetRoute can keep apps off the wrong network but can't move them. " +
-                "Run RUN-NETROUTE-SETUP.cmd as administrator to fix this."));
+                StatusWording.RepairAdvice));
         }
 
         foreach (var role in status.Roles.Where(r => r.Health != RoleHealth.Connected))
@@ -164,7 +164,7 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             }
             else if (system.Active)
             {
-                items.Add(HealthItem.Fine("Windows and Xbox downloads use Downloads", system.Summary,
+                items.Add(HealthItem.Fine("Windows and Xbox downloads are set to use Downloads", system.Summary,
                     "Turn off", () => main.Run(() => client.SetSystemDownloadsAsync(false), "Windows and Xbox downloads now follow Windows' default connection.")));
             }
             else if (!status.EnforcementPaused)
@@ -611,7 +611,7 @@ public sealed class GuiState
     }
 }
 
-/// <summary>"Prove it": the self-test, run from the app and shown step by step.</summary>
+/// <summary>The connection test (the self-test), run from the app and shown step by step.</summary>
 public partial class SelfTestViewModel(MainViewModel main) : ObservableObject
 {
     public ObservableCollection<SelfTestRow> Steps { get; } = [];
@@ -737,22 +737,44 @@ public partial class HistoryViewModel(MainViewModel main) : ObservableObject
             Apps.Add(Row($"{app.App}  ·  {app.Adapter}", app.Adapter, app.DownBytes, app.UpBytes, biggestApp));
         }
 
-        try
+        // Names are looked up lazily by the service, only for what is listed here, so the first
+        // answer shows addresses and later ones fill the names in. A few quick re-reads, then stop.
+        for (var pass = 0; pass < 6; pass++)
         {
-            foreach (var seen in await main.Client.GetConnectionHistoryAsync(40))
+            if (pass > 0)
             {
-                Connections.Add(new ConnectionRow(seen.App, seen.Host, seen.Adapter ?? "not tied to one network",
-                    $"{seen.Protocol.ToString().ToUpperInvariant()}  ·  {seen.Last:HH:mm}"));
+                await Task.Delay(2500);
             }
-        }
-        catch (Exception ex) when (ex is ServiceUnavailableException or NetRouteServiceException)
-        {
-            // An older service without this command: the rest of the screen still works.
+            if (!await LoadConnectionsAsync())
+            {
+                break;
+            }
         }
 
         Note = history.Days.Count == 0
             ? "Nothing recorded yet. NetRoute writes usage while your apps are actually using the network."
             : null;
+    }
+
+    /// <summary>Reads the recent connections. True while some are still showing a bare address instead of a name.</summary>
+    private async Task<bool> LoadConnectionsAsync()
+    {
+        try
+        {
+            var seenNow = await main.Client.GetConnectionHistoryAsync(40);
+            Connections.Clear();
+            foreach (var seen in seenNow)
+            {
+                Connections.Add(new ConnectionRow(seen.App, seen.Host, seen.Adapter ?? "not tied to one network",
+                    $"{seen.Protocol.ToString().ToUpperInvariant()}  ·  {seen.Last:HH:mm}"));
+            }
+            return seenNow.Any(c => c.Host == c.Address);
+        }
+        catch (Exception ex) when (ex is ServiceUnavailableException or NetRouteServiceException)
+        {
+            // An older service without this command: the rest of the screen still works.
+            return false;
+        }
     }
 
     private HistoryRow Row(string title, string adapter, double down, double up, double biggest)
