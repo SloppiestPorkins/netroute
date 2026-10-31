@@ -415,15 +415,28 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        var regroup = false;
         for (var i = 0; i < ordered.Count; i++)
         {
+            var before = Apps[i].Group;
             Apps[i].Update(ordered[i]);
+            regroup |= Apps[i].Group != before;
         }
 
         // After Update, because that is what sets each row's group.
         foreach (var row in Apps)
         {
             row.Card = Roles.FirstOrDefault(r => r.Role == row.Group);
+        }
+
+        // A row moved to another connection has to move under that connection's heading. The
+        // grouped view was relying on the row's own change notification to notice, and that did
+        // not reliably happen: after changing an app's network it stayed under the old heading
+        // until something else forced a re-group. Re-group explicitly when a group really changed
+        // (31 Oct 2026).
+        if (regroup)
+        {
+            AppsByConnection.Refresh();
         }
     }
 
