@@ -53,7 +53,7 @@ public sealed class PolicyResolver
         var gaming = resolvedRoles.GetValueOrDefault(RoleId.Gaming);
         var system = config.RouteSystemDownloads && config.SetupCompleted && !config.EnforcementPaused
                      && downloads is { State: AdapterState.Connected } && downloads.Luid != gaming?.Luid
-            ? new SystemDownloadsPlan(downloads, downloads.IsIpv4Only, SystemDownloadsPlan.WindowsDownloadServices)
+            ? new SystemDownloadsPlan(downloads, BlockIpv6: false, SystemDownloadsPlan.WindowsDownloadServices)
             : null;
 
         return new EnforcementPlan

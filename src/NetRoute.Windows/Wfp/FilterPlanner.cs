@@ -242,11 +242,11 @@ internal static class FilterPlanner
             {
                 if (plan.BlockIpv6)
                 {
-                    filters.Add(new FilterSpec(layer, FWP_ACTION_BLOCK, WeightCatchAllBlock,
-                        $"{label}: IPv6 blocked, Downloads is IPv4-only", identity));
-                }
-                else
-                {
+                    // Pinned even when Downloads has no IPv6 address. A block here makes the
+                    // service's IPv6 attempt fail outright, and once the other connection gained
+                    // IPv6 that refusal is what broke Xbox installs (31 Oct 2026). Pinning lets the
+                    // attempt fail quietly and fall back to IPv4; the catch-all block still stops
+                    // IPv6 leaving on any other connection.
                     AddServicePinned(filters, layer, identity, plan.Adapter.Luid, loopbackLuid, label);
                 }
             }

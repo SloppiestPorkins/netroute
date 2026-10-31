@@ -27,7 +27,9 @@ public sealed class SystemDownloadsTests
         var plan = new PolicyResolver(source).Resolve(config).SystemDownloads;
         Assert.NotNull(plan);
         Assert.Equal("Wi-Fi", plan!.Adapter.Name);
-        Assert.True(plan.BlockIpv6);
+        // Downloads has no IPv6 of its own, but its IPv6 is pinned rather than blocked, so an
+        // attempt fails quietly and falls back to IPv4 (31 Oct 2026).
+        Assert.False(plan.BlockIpv6);
         Assert.Contains("DoSvc", plan.Services);
 
         Assert.Null(new PolicyResolver(source).Resolve(config with { EnforcementPaused = true }).SystemDownloads);
