@@ -151,14 +151,16 @@ public sealed class PolicyResolver
             reasons.Add(Reason.Ok("Strict mode is enabled, so no other network may be used."));
         }
 
-        // The IPv6 decision has to be made here rather than left to routing. See §23 and
-        // the note on NetworkAdapter.IsIpv4Only.
-        var blockIpv6 = rule.EnforceIpv6 && adapter.IsIpv4Only;
-        if (blockIpv6)
+        // An app pinned to a connection with no IPv6 is NOT given an IPv6 block. The pin already
+        // denies IPv6 on every other connection, and this one has no IPv6 address to send from, so
+        // an IPv6 attempt just fails and the app falls back to IPv4 -- which is what games expect.
+        // Blocking it outright made Call of Duty refuse to load with IPv6 off on Ethernet
+        // (31 Oct 2026). If this connection gains IPv6 later, the pin lets the app use it.
+        const bool blockIpv6 = false;
+        if (rule.EnforceIpv6 && adapter.IsIpv4Only)
         {
-            reasons.Add(Reason.Bad(
-                $"{adapter.Name} has no IPv6 connection, so IPv6 is being blocked to stop it " +
-                "leaking out of another network."));
+            reasons.Add(Reason.Ok(
+                $"{adapter.Name} has no IPv6 connection, so the app uses IPv4 on it. IPv6 cannot leave by any other connection."));
         }
         else if (rule.EnforceIpv6 && adapter.Ipv6Address is not null)
         {

@@ -180,23 +180,13 @@ internal static class FilterPlanner
 
         if (rule.EnforceIpv6)
         {
-            if (app.BlockIpv6)
+            // Pinned even when the role's connection has no IPv6. The pin's own catch-all block
+            // already stops IPv6 leaving on any other connection, and the role's connection has
+            // no address to send from, so nothing leaks. Blocking here instead broke apps that
+            // treat a refused IPv6 connection as fatal (Call of Duty, 31 Oct 2026).
+            foreach (var layer in V6Layers)
             {
-                // The role's adapter has no IPv6 path. Permitting IPv6 on it would achieve
-                // nothing and omitting IPv6 filters entirely would let the traffic escape
-                // via the adapter that does have a v6 route. Blocking is the only option
-                // that keeps the policy honest (§23).
-                foreach (var layer in V6Layers)
-                {
-                    filters.Add(Block(layer, identity, rule, $"{name}: IPv6 blocked, role network is IPv4-only"));
-                }
-            }
-            else
-            {
-                foreach (var layer in V6Layers)
-                {
-                    AddPinned(filters, layer, identity, rule, luid, loopbackLuid);
-                }
+                AddPinned(filters, layer, identity, rule, luid, loopbackLuid);
             }
         }
     }

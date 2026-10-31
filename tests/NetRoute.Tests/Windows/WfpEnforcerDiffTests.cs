@@ -172,17 +172,20 @@ public sealed class WfpEnforcerDiffTests
         enforcer.Apply(PlanFor(alpha, beta));
 
         var alphaBefore = Count(store, "Alpha");
+        var alphaRolePermitsBefore = store.Live.Values.Count(f => f.Name.StartsWith("Alpha: permit on Gaming") || f.Name.StartsWith("Alpha: block outside Gaming"));
         var betaIds = store.Live.Where(f => f.Value.Name.StartsWith("Beta:")).Select(f => f.Key).ToHashSet();
         var alwaysBefore = store.Live.Values.Where(f => !f.Name.StartsWith("Alpha:") && !f.Name.StartsWith("Beta:")).ToList();
         store.ResetCounters();
 
         var result = enforcer.Apply(PlanFor(alpha with { Role = RoleId.Downloads }, beta));
 
-        // Alpha moved to the IPv4-only Downloads network: its permits and blocks are relabelled and re-pointed,
-        // and it has IPv6 blocks where it had IPv6 permits. Its two IPv4 loopback permits did not change,
-        // so those stay installed untouched.
-        Assert.Equal(alphaBefore - 2, result.FiltersRemoved);
-        Assert.Equal(alphaBefore - 2, store.Deleted.Count);
+        // Alpha moved to the Downloads network. Its permits on the role network and its catch-all
+        // blocks both name the role in their labels, so both are replaced; the loopback permits do
+        // not depend on the role, so they stay installed untouched. IPv6 is pinned
+        // like IPv4 even on an IPv4-only network (31 Oct 2026), so it is not blocked any more.
+        Assert.Equal(alphaRolePermitsBefore, result.FiltersRemoved);
+        Assert.Equal(result.FiltersRemoved, store.Deleted.Count);
+        Assert.DoesNotContain(store.Added, f => f.Name.Contains("IPv6 blocked"));
         Assert.DoesNotContain(store.Added, f => f.Name.EndsWith("permit loopback"));
         Assert.Contains(store.Live.Values, f => f.Name == "Alpha: permit loopback");
         Assert.All(store.Added, f => Assert.StartsWith("Alpha:", f.Name));

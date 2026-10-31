@@ -90,16 +90,18 @@ public class PolicyResolverTests
     /// IPv6 silently egressing via whichever adapter does have a v6 default route.
     /// </summary>
     [Fact]
-    public void Ipv4OnlyRoleBlocksIpv6ToPreventBypass()
+    public void Ipv4OnlyRolePinsIpv6RatherThanBlockingIt()
     {
+        // The pin already stops IPv6 leaving on any other connection, so blocking it here added
+        // nothing but a refusal that some games treat as fatal (Call of Duty, 31 Oct 2026).
         var config = SingleApp(RoleId.Downloads, WifiLuid, RoutingMode.Strict);
 
         var plan = Resolve(config, Ethernet(), Wifi());
         var app = plan.Applications.Single();
 
         Assert.Equal(EnforcementAction.PinToAdapter, app.Action);
-        Assert.True(app.BlockIpv6);
-        Assert.Contains(app.Reasons, r => r.Text.Contains("IPv6"));
+        Assert.False(app.BlockIpv6);
+        Assert.Contains(app.Reasons, r => r.Text.Contains("IPv6 cannot leave"));
     }
 
     /// <summary>A dual-stack role should enforce IPv6 rather than block it.</summary>
