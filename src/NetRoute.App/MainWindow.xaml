@@ -81,11 +81,10 @@
             <StackPanel Width="500">
                 <TextBlock Text="{Binding Title}" Style="{StaticResource H2}" Margin="0,0,0,18" />
                 <ItemsControl ItemsSource="{Binding Destinations}" ItemTemplate="{StaticResource DestinationTemplate}" />
-                <CheckBox IsChecked="{Binding FallBackWhenDown}" Margin="2,10,0,0">
+                <CheckBox IsChecked="{Binding FallBackWhenDown}" IsEnabled="{Binding CanChangeFallBack}" Margin="2,10,0,0">
                     <StackPanel>
                         <TextBlock Text="If that connection goes down, use the other one" FontWeight="SemiBold" />
-                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap"
-                                   Text="Off means NetRoute blocks the app instead, so it can never quietly use the wrong connection." />
+                        <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap" Text="{Binding FallBackNote}" />
                     </StackPanel>
                 </CheckBox>
                 <Button Content="Cancel" HorizontalAlignment="Right" Margin="0,8,0,0" IsCancel="True"

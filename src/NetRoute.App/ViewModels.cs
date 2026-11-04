@@ -1280,8 +1280,17 @@ public partial class ChangeNetworkViewModel : ObservableObject
         _main = main;
         _app = app;
         Destinations = DestinationChoice.For(main.Status, app.Rule.Role);
-        FallBackWhenDown = app.Rule.Mode == RoutingMode.Preferred;
+        FallBackWhenDown = app.Rule.Mode == RoutingMode.Preferred || (main.Status?.FallBackWhenDown == true);
     }
+
+    /// <summary>The Settings choice for every app. When it is on, this app's own box says so and cannot be changed here.</summary>
+    public bool SettingsFallBack => _main.Status?.FallBackWhenDown == true;
+
+    public bool CanChangeFallBack => !SettingsFallBack;
+
+    public string FallBackNote => SettingsFallBack
+        ? "Settings is set to use the other connection for every app, so this is already on."
+        : "Off means NetRoute blocks the app instead, so it can never quietly use the wrong connection.";
 
     public string Title => $"Where should {_app.Rule.App.DisplayName} connect?";
     public IReadOnlyList<DestinationChoice> Destinations { get; }
@@ -1305,7 +1314,9 @@ public partial class ChangeNetworkViewModel : ObservableObject
         {
             Role = destination.Role,
             Mode = destination.Role == RoleId.Default ? RoutingMode.Default
-                : FallBackWhenDown ? RoutingMode.Preferred : RoutingMode.Strict,
+                // While Settings decides this for every app, the app keeps its own mode, so turning Settings
+                // off later does not leave it behind as Preferred.
+                : SettingsFallBack ? _app.Rule.Mode : FallBackWhenDown ? RoutingMode.Preferred : RoutingMode.Strict,
         };
         await _main.Run(() => _main.Client.UpdateRuleAsync(updated), $"{_app.Rule.App.DisplayName} now uses {destination.Title}.");
     }
