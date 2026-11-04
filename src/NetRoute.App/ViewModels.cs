@@ -59,6 +59,7 @@ public partial class MainViewModel : ObservableObject
         // Groups follow the sort, so this is what puts Gaming above Downloads.
         AppsByConnection.SortDescriptions.Add(new SortDescription(nameof(AppRowViewModel.GroupOrder), ListSortDirection.Ascending));
         AppsByConnection.SortDescriptions.Add(new SortDescription(nameof(AppRowViewModel.Name), ListSortDirection.Ascending));
+        AppsByConnection.Filter = row => row is AppRowViewModel app && MatchesSearch(app);
         Apps.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasNoApps));
     }
 
@@ -140,6 +141,18 @@ public partial class MainViewModel : ObservableObject
     /// is the connection's own card, which is why there is no longer a networks section above.
     /// </summary>
     public ICollectionView AppsByConnection { get; }
+
+    /// <summary>
+    /// What the apps list is filtered by. With 20-odd apps, finding one by scrolling was the slowest
+    /// part of the list (4 Nov 2026). Matches the name, case-insensitive, and nothing else.
+    /// </summary>
+    [ObservableProperty] private string _searchText = "";
+
+    partial void OnSearchTextChanged(string value) => AppsByConnection.Refresh();
+
+    private bool MatchesSearch(AppRowViewModel app)
+        => string.IsNullOrWhiteSpace(SearchText)
+           || app.Name.Contains(SearchText.Trim(), StringComparison.OrdinalIgnoreCase);
     public SetupViewModel Setup { get; }
 
     internal INetRouteClient Client => _client;
@@ -747,6 +760,14 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>The Updates panel: where to look, whether to look, and what was found.</summary>
+    /// <summary>The Settings panel: the choices that apply to the whole PC.</summary>
+    [RelayCommand]
+    private Task OpenSettings()
+    {
+        Overlay = new SettingsViewModel(this);
+        return Task.CompletedTask;
+    }
+
     [RelayCommand]
     private async Task ShowUpdates()
     {

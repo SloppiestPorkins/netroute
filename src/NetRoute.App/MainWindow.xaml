@@ -414,6 +414,52 @@
         </DataTemplate>
 
         <!-- Add App -->
+        <!-- Settings -->
+        <DataTemplate DataType="{x:Type local:SettingsViewModel}">
+            <Grid Width="620">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock Text="Settings" Style="{StaticResource H2}" />
+                    <TextBlock Text="Choices that apply to the whole PC." Style="{StaticResource Caption}" Margin="0,6,0,0" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Margin="0,22,0,0">
+                    <TextBlock Text="When a connection goes down" FontWeight="SemiBold" />
+                    <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,14"
+                               Text="Your apps are assigned to a connection. If that connection drops, you can have them block until it returns, or carry on over the other one." />
+
+                    <RadioButton IsChecked="{Binding Block}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="Block them until it's back" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                       Text="Nothing leaves by the other connection. Safest if an app must never go online on a line you didn't choose." />
+                        </StackPanel>
+                    </RadioButton>
+
+                    <RadioButton IsChecked="{Binding FallBack}">
+                        <StackPanel>
+                            <TextBlock Text="Use the other connection" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                       Text="The app keeps working, on whichever connection is up. It can end up on the Downloads line, so a game can lose its clean line while the other one is out." />
+                        </StackPanel>
+                    </RadioButton>
+
+                    <TextBlock Text="{Binding Current}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,18,0,0" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                    <Button Style="{StaticResource PrimaryButton}" Content="Save" Margin="0,0,8,0" Command="{Binding SaveCommand}" />
+                    <Button Content="Close" IsCancel="True"
+                            Command="{Binding DataContext.CloseOverlayCommand, RelativeSource={RelativeSource AncestorType=Window}}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
         <!-- Updates -->
         <DataTemplate DataType="{x:Type local:UpdatesViewModel}">
             <Grid Width="620">
@@ -666,6 +712,12 @@
                             <TextBlock Text="{Binding PauseText}" />
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding OpenSettingsCommand}" Margin="8,3,0,3" ToolTip="Settings for the whole PC">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE713;" Margin="0,0,8,0" />
+                            <TextBlock Text="Settings" />
+                        </StackPanel>
+                    </Button>
                     <Button Style="{StaticResource DangerButton}" Command="{Binding EmergencyDisableCommand}" Margin="8,3,0,3">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE7E8;" Margin="0,0,8,0" />
@@ -728,7 +780,7 @@
             <!-- Apps header -->
             <StackPanel Grid.Row="2" Margin="0,22,0,10">
                 <DockPanel>
-                    <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding AddAppCommand}">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Command="{Binding AddAppCommand}" VerticalAlignment="Top" Margin="0,6,0,0">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Style="{StaticResource Icon}" Text="&#xE710;" Margin="0,0,8,0" />
                             <TextBlock Text="Add App" />
@@ -736,6 +788,8 @@
                     </Button>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="WHAT IS USING EACH CONNECTION" Style="{StaticResource Section}" />
+                        <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Width="260" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                 Tag="Find an app" ToolTip="Filter the list by name" />
                         <TextBlock Text="{Binding RedirectText}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,12,0"
                                    Visibility="{Binding RedirectText, Converter={StaticResource NullVisibility}}" />
                     </StackPanel>

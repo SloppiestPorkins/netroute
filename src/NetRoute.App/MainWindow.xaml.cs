@@ -108,6 +108,9 @@ public partial class MainWindow : Window
             case "suggest":
                 await _vm.OpenSuggestDownloadsAsync();
                 break;
+            case "settings":
+                _vm.OpenSettingsCommand.Execute(null);
+                break;
             case "updates":
                 await _vm.ShowUpdatesCommand.ExecuteAsync(null);
                 break;
