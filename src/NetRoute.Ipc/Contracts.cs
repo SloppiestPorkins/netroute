@@ -23,6 +23,8 @@ public sealed record SetPausedRequest(bool Paused, int? Minutes = null);
 
 public sealed record SetSystemDownloadsRequest(bool Enabled);
 
+public sealed record SetFallBackWhenDownRequest(bool Enabled);
+
 public sealed record SetPauseDownloadsRequest(bool Enabled);
 
 public sealed record SetQuietHoursRequest(int? FromHour, int? ToHour);
@@ -161,6 +163,9 @@ public sealed record ServiceStatusDto
     public required bool EnforcementActive { get; init; }
 
     public required bool EnforcementPaused { get; init; }
+
+    /// <summary>Whether apps fall back to the other connection when theirs goes down (see NetRouteConfig).</summary>
+    public bool FallBackWhenDown { get; init; }
 
     /// <summary>When a timed pause ends. Null when not paused or paused until resumed.</summary>
     public DateTimeOffset? PausedUntil { get; init; }

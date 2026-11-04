@@ -242,6 +242,7 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
                 IpcCommands.FixRouteTie => await engine.FixRouteTieAsync(ct),
                 IpcCommands.GetAppRates => engine.GetAppRates(),
                 IpcCommands.SetSystemDownloads => await SetSystemDownloads(request, ct),
+                IpcCommands.SetFallBackWhenDown => await SetFallBackWhenDown(request, ct),
                 IpcCommands.SetPauseDownloads => await SetPauseDownloads(request, ct),
                 IpcCommands.SetQuietHours => await SetQuietHours(request, ct),
                 IpcCommands.StartSelfTest => await engine.StartSelfTestAsync(ct),
@@ -287,6 +288,7 @@ public sealed class NamedPipeServer(NetRouteEngine engine, string? pipeName = nu
     private async Task<object?> SetRulePaused(IpcRequest r, CancellationToken ct) { var p = Payload<SetRulePausedRequest>(r); await engine.SetRulePausedAsync(p.RuleId, p.Paused, ct); return null; }
     private async Task<object?> SetPaused(IpcRequest r, CancellationToken ct) { var p = Payload<SetPausedRequest>(r); await engine.SetEnforcementPausedAsync(p.Paused, p.Minutes, ct); return null; }
     private async Task<object?> SetSystemDownloads(IpcRequest r, CancellationToken ct) { await engine.SetSystemDownloadsAsync(Payload<SetSystemDownloadsRequest>(r).Enabled, ct); return null; }
+    private async Task<object?> SetFallBackWhenDown(IpcRequest r, CancellationToken ct) { await engine.SetFallBackWhenDownAsync(Payload<SetFallBackWhenDownRequest>(r).Enabled, ct); return null; }
     private async Task<object?> SetPauseDownloads(IpcRequest r, CancellationToken ct) { await engine.SetPauseDownloadsAsync(Payload<SetPauseDownloadsRequest>(r).Enabled, ct); return null; }
     private async Task<object?> SetQuietHours(IpcRequest r, CancellationToken ct) { var p = Payload<SetQuietHoursRequest>(r); await engine.SetQuietHoursAsync(p.FromHour, p.ToHour, ct); return null; }
     private async Task<object?> SetUpdateSettings(IpcRequest r, CancellationToken ct) { var p = Payload<SetUpdateSettingsRequest>(r); await engine.SetUpdateSettingsAsync(p.FeedUrl, p.Automatic, ct); return null; }

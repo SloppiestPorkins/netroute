@@ -52,6 +52,9 @@ public interface INetRouteClient
     /// <summary>Keep Windows Update, Store and Xbox downloads on Downloads (see SystemDownloadsPlan).</summary>
     Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default);
 
+    /// <summary>When a connection goes down, send its apps over the other one instead of blocking them.</summary>
+    Task SetFallBackWhenDownAsync(bool enabled, CancellationToken ct = default);
+
     /// <summary>Block Downloads apps while a Gaming app is running.</summary>
     Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default);
 

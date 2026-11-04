@@ -205,6 +205,8 @@ public sealed class DemoNetRouteClient : INetRouteClient
         return Task.CompletedTask;
     }
 
+    public Task SetFallBackWhenDownAsync(bool enabled, CancellationToken ct = default) => Task.CompletedTask;
+
     public Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default)
     {
         _pauseDownloads = enabled;

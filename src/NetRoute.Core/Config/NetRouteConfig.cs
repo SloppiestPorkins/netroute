@@ -39,6 +39,14 @@ public sealed record NetRouteConfig
     public bool RouteSystemDownloads { get; init; } = true;
 
     /// <summary>
+    /// When a connection goes down, send the apps that were assigned to it over the other one
+    /// instead of blocking them. Applies to every app, Strict ones included. Off by default: Strict
+    /// is the behaviour that keeps an app off a connection it was not given, and that is still the
+    /// default for anyone who does not turn this on.
+    /// </summary>
+    public bool FallBackWhenDown { get; init; } = false;
+
+    /// <summary>
     /// Block Downloads apps while a Gaming app is running. Off by default: with two connections
     /// the downloads are already on the other line. It is what makes NetRoute useful on a PC
     /// with only one connection, where separating traffic isn't possible at all.

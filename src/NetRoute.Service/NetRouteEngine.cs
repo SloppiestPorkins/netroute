@@ -168,6 +168,7 @@ public sealed class NetRouteEngine : IDisposable
                 // the other rules, which are installed and working, look switched off.
                 EnforcementActive = _backend.IsAvailable && !config.EnforcementPaused,
                 EnforcementPaused = config.EnforcementPaused,
+                FallBackWhenDown = config.FallBackWhenDown,
                 PausedUntil = config.EnforcementPaused ? config.PausedUntil : null,
                 SystemDownloads = DescribeSystemDownloads(config),
                 DownloadsPause = new DownloadsPauseDto(config.PauseDownloadsWhileGaming, plan.DownloadsPausedFor,
@@ -270,6 +271,9 @@ public sealed class NetRouteEngine : IDisposable
 
     public Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default)
         => MutateAsync(config => config with { RouteSystemDownloads = enabled }, ct);
+
+    public Task SetFallBackWhenDownAsync(bool enabled, CancellationToken ct = default)
+        => MutateAsync(config => config with { FallBackWhenDown = enabled }, ct);
 
     /// <summary>Not under the gate: the meter has its own lock and nothing here touches config.</summary>
     public AppRatesDto GetAppRates() => _rates.GetRates();

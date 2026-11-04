@@ -125,7 +125,7 @@ public sealed class PolicyResolver
         if (binding is null)
         {
             reasons.Add(Reason.Bad($"{rule.Role.DisplayName()} has not been pointed at a network yet."));
-            return UnavailableRole(rule, null, reasons);
+            return UnavailableRole(rule, null, reasons, config.FallBackWhenDown);
         }
 
         var adapter = resolvedRoles.GetValueOrDefault(rule.Role);
@@ -133,7 +133,7 @@ public sealed class PolicyResolver
         {
             var name = binding.LastKnownName ?? "the selected adapter";
             reasons.Add(Reason.Bad($"{rule.Role.DisplayName()} points at {name}, which is no longer present."));
-            return UnavailableRole(rule, null, reasons);
+            return UnavailableRole(rule, null, reasons, config.FallBackWhenDown);
         }
 
         reasons.Add(Reason.Ok($"{rule.Role.DisplayName()} currently points to {adapter.Name}."));
@@ -141,7 +141,7 @@ public sealed class PolicyResolver
         if (adapter.State != AdapterState.Connected)
         {
             reasons.Add(Reason.Bad($"{adapter.Name} is {Describe(adapter.State)}."));
-            return UnavailableRole(rule, adapter, reasons);
+            return UnavailableRole(rule, adapter, reasons, config.FallBackWhenDown);
         }
 
         reasons.Add(Reason.Ok($"{adapter.Name} is connected."));
@@ -170,15 +170,21 @@ public sealed class PolicyResolver
         return Plan(rule, EnforcementAction.PinToAdapter, adapter, blockIpv6, reasons);
     }
 
-    private static AppEnforcement UnavailableRole(AppRule rule, NetworkAdapter? adapter, List<Reason> reasons)
+    private static AppEnforcement UnavailableRole(AppRule rule, NetworkAdapter? adapter, List<Reason> reasons, bool fallBackWhenDown)
     {
-        // Strict never silently degrades onto another network - that is the entire point of the
-        // mode, and §15/§39 are explicit that falling back is wrong. Strict IS the kill switch;
-        // the only way to get a fall-back is Preferred mode.
-        if (rule.Mode == RoutingMode.Strict)
+        // Strict never silently degrades onto another network by default - that is the point of the
+        // mode, and §15/§39 are explicit that falling back is wrong. The one exception is the
+        // global "use the other connection" setting, which the person turned on knowing this.
+        if (rule.Mode == RoutingMode.Strict && !fallBackWhenDown)
         {
             reasons.Add(Reason.Bad("Strict mode is on, so this app is blocked rather than sent over another network."));
             return Plan(rule, EnforcementAction.BlockAll, adapter, true, reasons);
+        }
+
+        if (rule.Mode == RoutingMode.Strict)
+        {
+            reasons.Add(Reason.Bad("This connection is down, and the setting to use the other one is on, so this app is sent over Windows routing."));
+            return Plan(rule, EnforcementAction.FallBackToWindows, adapter, false, reasons);
         }
 
         reasons.Add(Reason.Bad("Preferred mode is on, so Windows routing is being allowed to take over."));

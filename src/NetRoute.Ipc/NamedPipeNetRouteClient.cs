@@ -29,6 +29,7 @@ public sealed class NamedPipeNetRouteClient(string? pipeName = null, bool? verif
     public Task SetEnforcementPausedAsync(bool paused, int? minutes = null, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetEnforcementPaused, new SetPausedRequest(paused, minutes), ct);
     public Task<AppRatesDto> GetAppRatesAsync(CancellationToken ct = default) => CallAsync<AppRatesDto>(IpcCommands.GetAppRates, null, ct);
     public Task SetSystemDownloadsAsync(bool enabled, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetSystemDownloads, new SetSystemDownloadsRequest(enabled), ct);
+    public Task SetFallBackWhenDownAsync(bool enabled, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetFallBackWhenDown, new SetFallBackWhenDownRequest(enabled), ct);
     public Task SetPauseDownloadsAsync(bool enabled, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetPauseDownloads, new SetPauseDownloadsRequest(enabled), ct);
     public Task SetQuietHoursAsync(int? fromHour, int? toHour, CancellationToken ct = default) => CallAsync<object?>(IpcCommands.SetQuietHours, new SetQuietHoursRequest(fromHour, toHour), ct);
     public Task<UpdateDto?> CheckForUpdateAsync(CancellationToken ct = default) => CallAsync<UpdateDto?>(IpcCommands.CheckForUpdate, null, ct);

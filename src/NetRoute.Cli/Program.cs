@@ -50,6 +50,15 @@ static async Task<int> RunAsync(string[] args)
                     : "NetRoute enforcement paused until you run 'netroute resume'.");
                 break;
             }
+            case "fallback" when args.Length > 1 && args[1] is "on" or "off":
+            {
+                var on = args[1] == "on";
+                await client.SetFallBackWhenDownAsync(on);
+                Console.WriteLine(on
+                    ? "When a connection goes down, its apps now use the other one."
+                    : "When a connection goes down, its Strict apps are blocked until it is back.");
+                break;
+            }
             case "system-downloads" when args.Length > 1 && args[1] is "on" or "off":
             {
                 var on = args[1] == "on";

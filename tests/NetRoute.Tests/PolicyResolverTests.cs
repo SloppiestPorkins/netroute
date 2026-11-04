@@ -173,6 +173,33 @@ public class PolicyResolverTests
         };
     }
 
+    [Fact]
+    public void A_strict_app_still_blocks_when_its_connection_is_down_by_default()
+    {
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict);
+        var plan = Resolve(config, Ethernet(AdapterState.Disconnected), Wifi());
+
+        Assert.Equal(EnforcementAction.BlockAll, Find(plan, "Halo Infinite").Action);
+    }
+
+    [Fact]
+    public void With_the_fallback_setting_a_strict_app_uses_the_other_connection_when_its_own_is_down()
+    {
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict) with { FallBackWhenDown = true };
+        var plan = Resolve(config, Ethernet(AdapterState.Disconnected), Wifi());
+
+        Assert.Equal(EnforcementAction.FallBackToWindows, Find(plan, "Halo Infinite").Action);
+    }
+
+    [Fact]
+    public void The_fallback_setting_does_not_change_an_app_that_is_up()
+    {
+        var config = SingleApp(RoleId.Gaming, EthernetLuid, RoutingMode.Strict) with { FallBackWhenDown = true };
+        var plan = Resolve(config, Ethernet(), Wifi());
+
+        Assert.Equal(EnforcementAction.PinToAdapter, Find(plan, "Halo Infinite").Action);
+    }
+
     /// <summary>Dual-stack wired uplink.</summary>
     private static NetworkAdapter Ethernet(AdapterState state = AdapterState.Connected) => new()
     {
