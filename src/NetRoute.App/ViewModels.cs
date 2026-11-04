@@ -928,6 +928,7 @@ public partial class AppRowViewModel : ObservableObject
 
     // Live strip: where the app really is, how fast, how laggy. Empty until the first reading.
     [ObservableProperty] private bool _hasLive;
+    [ObservableProperty] private bool _showPlacement = true;
     [ObservableProperty] private string _placeText = "";
     [ObservableProperty] private string _placeGlyph = "";
     [ObservableProperty] private Brush _placeBrush = Brushes.Gray;
@@ -969,10 +970,13 @@ public partial class AppRowViewModel : ObservableObject
         {
             PlacementState.Mismatch => ("BadBrush", "BadTintBrush", ""),
             PlacementState.Split => ("WarnBrush", "WarnTintBrush", ""),
-            PlacementState.OnAssigned => ("GoodBrush", "GoodTintBrush", ""),
+            // A healthy placement is neutral, so colour marks only the rows that need a look (4 Nov 2026).
+            PlacementState.OnAssigned => ("MutedBrush", "NeutralTintBrush", ""),
             _ => ("MutedBrush", "NeutralTintBrush", "")
         };
         PlaceText = live.Headline;
+        // On its assigned connection, the status word already says so; the chip would repeat it.
+        ShowPlacement = state != PlacementState.OnAssigned;
         PlaceGlyph = glyph;
         PlaceBrush = Ui.Res(brush);
         PlaceTint = Ui.Res(tint);
@@ -1000,7 +1004,8 @@ public partial class AppRowViewModel : ObservableObject
         StatusText = badge.Text;
         var (brush, tint) = badge.Tone switch
         {
-            Tone.Good => ("GoodBrush", "GoodTintBrush"),
+            // Healthy rows are neutral, so colour marks only the ones that need a look.
+            Tone.Good => ("MutedBrush", "NeutralTintBrush"),
             Tone.Warn => ("WarnBrush", "WarnTintBrush"),
             Tone.Bad => ("BadBrush", "BadTintBrush"),
             _ => ("MutedBrush", "NeutralTintBrush")
