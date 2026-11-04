@@ -243,7 +243,17 @@ public sealed class NetRouteEngine : IDisposable
     }, ct);
 
     public Task RemoveRuleAsync(Guid ruleId, CancellationToken ct = default) => MutateAsync(config =>
-        config with { AppRules = config.AppRules.Where(r => r.Id != ruleId).ToList() }, ct);
+    {
+        // Recorded, so an app that disappears from the list has a visible reason. Two earlier
+        // disappearances left no trace (4 Nov 2026).
+        var removed = config.AppRules.FirstOrDefault(r => r.Id == ruleId);
+        if (removed is not null)
+        {
+            AddEvent(ServiceEventKind.Info, "App removed",
+                $"{removed.App.DisplayName} was removed from your apps, so Windows' own routing applies to it now.");
+        }
+        return config with { AppRules = config.AppRules.Where(r => r.Id != ruleId).ToList() };
+    }, ct);
 
     public Task SetRulePausedAsync(Guid ruleId, bool paused, CancellationToken ct = default) => MutateAsync(config =>
     {

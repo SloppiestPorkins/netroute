@@ -130,6 +130,24 @@ public partial class HealthViewModel(MainViewModel main) : ObservableObject
             }
         }
 
+        // The Xbox app is a Store package, so the launcher scan above never sees it. On 31 Oct it had
+        // no rule at all, its downloads split across both lines, and nothing said so. Checked by its
+        // package name instead, and only when it is actually installed (4 Nov 2026).
+        const string XboxPackage = "Microsoft.GamingApp_8wekyb3d8bbwe";
+        if (status.Apps.All(a => !string.Equals(a.Rule.App.PackageFamilyName, XboxPackage, StringComparison.OrdinalIgnoreCase)))
+        {
+            var xboxInstalled = installed.Any(a => string.Equals(a.Identity.PackageFamilyName, XboxPackage, StringComparison.OrdinalIgnoreCase));
+            if (xboxInstalled)
+            {
+                items.Add(HealthItem.Problem("The Xbox app isn't in your apps",
+                    "Its downloads and game installs use whichever connection Windows prefers, and can split across both. "
+                    + "Put it on Downloads so installs stay on that line.",
+                    "Put on Downloads", () => main.Run(
+                        () => client.AddRuleAsync(AppIdentity.ForPackage(XboxPackage, "Xbox"), RoleId.Downloads),
+                        "The Xbox app now uses Downloads.")));
+            }
+        }
+
         foreach (var browser in status.Apps.Where(a => a.Rule.Role == RoleId.Gaming && a.Rule.App.ExecutablePath is { } p
                                                       && Win32AppDiscovery.CategoryOf(p) == AppCategory.Browser))
         {
