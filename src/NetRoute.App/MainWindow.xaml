@@ -413,6 +413,31 @@
         </DataTemplate>
 
         <!-- Add App -->
+        <!-- One app's settings -->
+        <DataTemplate DataType="{x:Type local:AppSettingsViewModel}">
+            <Grid Width="520">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel>
+                    <TextBlock Text="{Binding Name}" Style="{StaticResource H2}" />
+                    <TextBlock Text="{Binding Status}" FontWeight="SemiBold" Margin="0,6,0,0" />
+                    <TextBlock Text="{Binding Detail}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Visibility="{Binding Detail, Converter={StaticResource NullVisibility}}" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Margin="0,22,0,0">
+                    <Button Content="Change which connection it uses" HorizontalAlignment="Stretch" Margin="0,0,0,8" Command="{Binding ChangeNetworkCommand}" />
+                    <Button Content="Why it's on this connection" HorizontalAlignment="Stretch" Margin="0,0,0,8" Command="{Binding WhyCommand}" />
+                    <Button Content="{Binding PauseText}" HorizontalAlignment="Stretch" Margin="0,0,0,8" Command="{Binding TogglePauseCommand}" />
+                    <Button Content="Remove from my apps" HorizontalAlignment="Stretch" Command="{Binding RemoveCommand}" />
+                </StackPanel>
+                <Button Grid.Row="3" Content="Close" HorizontalAlignment="Right" Margin="0,18,0,0" IsCancel="True" Command="{Binding CloseCommand}" />
+            </Grid>
+        </DataTemplate>
+
         <!-- Settings -->
         <DataTemplate DataType="{x:Type local:SettingsViewModel}">
             <Grid Width="620">
@@ -863,69 +888,32 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border Background="{Binding CardFill}" BorderBrush="{Binding CardBrush}" BorderThickness="1"
-                                        CornerRadius="10" Padding="14,12" Margin="0,0,0,8">
-                                    <StackPanel>
+                                        CornerRadius="8" Padding="12,9" Margin="0,0,0,6" ToolTip="{Binding Summary}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Border Width="38" Height="38" CornerRadius="9" Background="{StaticResource NeutralTintBrush}">
-                                            <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" FontSize="16"
-                                                       Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" />
+                                        <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource NeutralTintBrush}">
+                                            <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" FontSize="14"
+                                                       Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
-                                        <StackPanel Grid.Column="1" Margin="14,0,12,0" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding Summary}" Style="{StaticResource Caption}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"
-                                                       Visibility="{Binding ShowSummary, Converter={StaticResource BoolVisibility}}" />
-                                        </StackPanel>
-                                        <!-- The role is the heading this app sits under, so it isn't repeated on the row. -->
-                                        <Button Grid.Column="2" Style="{StaticResource LinkButton}" Content="Change" VerticalAlignment="Center"
-                                                ToolTip="Change which connection this app uses"
-                                                Command="{Binding DataContext.ChangeNetworkCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                CommandParameter="{Binding}" />
-                                        <Border Grid.Column="3" Style="{StaticResource Pill}" Background="{Binding StatusTint}" Margin="8,0" MinWidth="96">
+                                        <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" Margin="12,0" />
+                                        <Border Grid.Column="2" Style="{StaticResource Pill}" Background="{Binding StatusTint}" MinWidth="96" Margin="0,0,8,0">
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                                 <Ellipse Width="7" Height="7" Fill="{Binding StatusBrush}" VerticalAlignment="Center" />
                                                 <TextBlock Text="{Binding StatusText}" FontSize="13" FontWeight="SemiBold" Margin="6,0,0,0" />
                                             </StackPanel>
                                         </Border>
-                                        <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Button Content="Why?" Style="{StaticResource LinkButton}"
-                                                    Command="{Binding DataContext.WhyCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}" />
-                                            <Button Style="{StaticResource IconButton}" ToolTip="{Binding PauseTip}"
-                                                    Command="{Binding DataContext.TogglePauseCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}">
-                                                <TextBlock Style="{StaticResource Icon}" Text="{Binding PauseGlyph}" />
-                                            </Button>
-                                            <Button Style="{StaticResource IconButton}" ToolTip="Remove"
-                                                    Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding}">
-                                                <TextBlock Style="{StaticResource Icon}" Text="&#xE74D;" />
-                                            </Button>
-                                        </StackPanel>
+                                        <Button Grid.Column="3" Style="{StaticResource IconButton}" ToolTip="App settings"
+                                                Command="{Binding DataContext.OpenAppCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}">
+                                            <TextBlock Style="{StaticResource Icon}" Text="&#xE713;" />
+                                        </Button>
                                     </Grid>
-
-                                    <!-- Live: where this app really is, how fast, how laggy. Rows stay when idle. -->
-                                    <WrapPanel Margin="52,10,0,0" Visibility="{Binding HasLive, Converter={StaticResource BoolVisibility}}">
-                                        <Border Style="{StaticResource Pill}" Background="{Binding PlaceTint}" HorizontalAlignment="Left" Padding="10,4" Margin="0,0,16,0" Visibility="{Binding ShowPlacement, Converter={StaticResource BoolVisibility}}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Style="{StaticResource Icon}" Text="{Binding PlaceGlyph}" FontSize="12" Foreground="{Binding PlaceBrush}" Margin="0,0,7,0" />
-                                                <TextBlock Text="{Binding PlaceText}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                            </StackPanel>
-                                        </Border>
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding RateText}" FontSize="13" Foreground="{Binding RateBrush}" ToolTip="Speed over the last few seconds, smoothed" />
-                                            <TextBlock Text="{Binding LatencyText}" FontSize="13" Foreground="{Binding LatencyBrush}" Margin="16,0,0,0"
-                                                       ToolTip="{Binding LatencyTip}" Visibility="{Binding LatencyText, Converter={StaticResource NullVisibility}}" />
-                                            <TextBlock Text="{Binding ConnectionText}" Style="{StaticResource Caption}" FontSize="13" Margin="16,0,0,0" />
-                                        </StackPanel>
-                                    </WrapPanel>
-                                    </StackPanel>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

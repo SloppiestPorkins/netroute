@@ -108,6 +108,9 @@ public partial class MainWindow : Window
             case "suggest":
                 await _vm.OpenSuggestDownloadsAsync();
                 break;
+            case "app" when _vm.Apps.Count > 0:
+                _vm.OpenAppCommand.Execute(_vm.Apps[0]);
+                break;
             case "settings":
                 _vm.OpenSettingsCommand.Execute(null);
                 break;

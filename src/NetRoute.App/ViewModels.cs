@@ -527,6 +527,10 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void Why(AppRowViewModel row) => Overlay = new WhyViewModel(row.Dto);
 
+    /// <summary>Everything about one app, opened from its row (4 Nov 2026).</summary>
+    [RelayCommand]
+    private void OpenApp(AppRowViewModel row) => Overlay = new AppSettingsViewModel(this, row);
+
     [RelayCommand]
     private void ChangeNetwork(AppRowViewModel row) => Overlay = new ChangeNetworkViewModel(this, row.Dto);
 
