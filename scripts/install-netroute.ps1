@@ -74,7 +74,9 @@ try {
     $ErrorActionPreference = 'Continue'   # dotnet writes progress to stderr; don't treat it as fatal
     foreach ($project in 'src\NetRoute.Service', 'src\NetRoute.Cli', 'src\NetRoute.App') {
         Write-Host "  Building $project"
-        & dotnet publish (Join-Path $root $project) -c Release -o $stage --nologo 2>&1 | ForEach-Object { "    $_" }
+        # Self-contained, as the release installer is. A framework-dependent service runs as
+        # LocalSystem, which couldn't find the .NET runtime, and failed to start (5 Nov 2026).
+        & dotnet publish (Join-Path $root $project) -c Release -r win-x64 --self-contained true -o $stage --nologo 2>&1 | ForEach-Object { "    $_" }
         if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = 'Stop'; Fail "Building $project failed (see above). Your current NetRoute was left running." }
     }
     $ErrorActionPreference = 'Stop'

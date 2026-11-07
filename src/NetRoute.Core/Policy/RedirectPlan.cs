@@ -7,36 +7,33 @@ namespace NetRoute.Core.Policy;
 /// What NetRoute asks of the split-tunnel driver and of Windows' routing table.
 ///
 /// <para>The driver moves a set of processes ONTO one adapter and keeps them off another,
-/// and child processes inherit membership of that set. If the set were Downloads apps,
-/// every game Steam launches would be dragged onto Downloads with it (§36, §37). So the
-/// mapping is inverted:</para>
+/// and child processes inherit membership of that set. So the set has to be the apps that
+/// are deliberately moved, and the default route has to be the line everything else uses:</para>
 /// <list type="bullet">
-/// <item>the Downloads adapter becomes Windows' default route, where launchers, browsers and
-/// updates go without being told;</item>
-/// <item>apps assigned to Gaming are the split set, moved onto the Gaming adapter.</item>
+/// <item>the Gaming (primary) adapter becomes Windows' default route. Everything not in a rule,
+/// including launchers, browsers and Discord, goes there without being told;</item>
+/// <item>apps assigned to Downloads are the split set, moved onto the Downloads (secondary) adapter.</item>
 /// </list>
-/// <para>A game Steam launches is split by its own program file, not by Steam's.</para>
-///
-/// <para>This is a deliberate, visible change to Windows: while any app is assigned to Gaming,
-/// everything NOT in a rule (a new browser, Discord, Spotify, name lookups) follows the Downloads
-/// line, because that is Windows' default route. The "Default" choice therefore means "Windows
-/// routing, which NetRoute points at Downloads", and the UI and README say exactly that. With no
-/// Gaming app there is nothing to split, so Windows' metrics are left (or put back) alone.</para>
+/// <para>Child processes of a Downloads app inherit the move, so a launcher on Downloads takes its
+/// games with it (docs/SPLIT-TUNNEL.md). Keep launchers on the primary line unless you want that.</para>
 /// </summary>
 public sealed record RedirectPlan
 {
     /// <summary>
-    /// Make <see cref="Downloads"/> win Windows' IPv4 default route over <see cref="Gaming"/>. Only
-    /// true while at least one app is assigned to Gaming: that is the one case where the split
-    /// needs Downloads to be the default. Without it Windows keeps choosing for itself.
+    /// Make <see cref="DefaultAdapter"/> win Windows' IPv4 default route. Always true while both lines
+    /// are present, so an unassigned app never falls back to whichever line Windows happens to pick.
     /// </summary>
     public required bool ManageDefaultRoute { get; init; }
 
     /// <summary>Engage the driver for <see cref="SplitRules"/>.</summary>
     public required bool Split { get; init; }
 
-    public NetworkAdapter? Downloads { get; init; }
-    public NetworkAdapter? Gaming { get; init; }
+    /// <summary>The line everything not assigned to Downloads uses (the primary connection).</summary>
+    public NetworkAdapter? DefaultAdapter { get; init; }
+
+    /// <summary>The line the Downloads apps are moved onto (the secondary connection).</summary>
+    public NetworkAdapter? SplitAdapter { get; init; }
+
     public IReadOnlyList<AppRule> SplitRules { get; init; } = [];
 
     /// <summary>Why apps are not being moved, in words for the user. Null while they are.</summary>
@@ -44,8 +41,8 @@ public sealed record RedirectPlan
 
     public string Fingerprint => string.Join('|',
         ManageDefaultRoute, Split,
-        Downloads?.Luid, Downloads?.InterfaceIndex, Downloads?.Ipv4Address, Downloads?.Ipv6Address,
-        Gaming?.Luid, Gaming?.InterfaceIndex, Gaming?.Ipv4Address, Gaming?.Ipv6Address,
+        DefaultAdapter?.Luid, DefaultAdapter?.InterfaceIndex, DefaultAdapter?.Ipv4Address, DefaultAdapter?.Ipv6Address,
+        SplitAdapter?.Luid, SplitAdapter?.InterfaceIndex, SplitAdapter?.Ipv4Address, SplitAdapter?.Ipv6Address,
         string.Join(',', SplitRules.OrderBy(r => r.Id).Select(r => $"{r.Id}:{r.App.ExecutablePath}:{r.App.InstallLocation}")));
 }
 
@@ -62,46 +59,38 @@ public static class RedirectPlanner
             return Off("Protection is paused.");
         }
 
-        var gaming = Find(config.BindingFor(RoleId.Gaming), adapters);
-        var downloads = Find(config.BindingFor(RoleId.Downloads), adapters);
-        if (gaming is null || downloads is null)
+        var primary = Find(config.BindingFor(RoleId.Gaming), adapters);
+        var secondary = Find(config.BindingFor(RoleId.Downloads), adapters);
+        if (primary is null || secondary is null)
         {
-            return Off("The Gaming or Downloads network isn't present.");
+            return Off("The primary or Downloads network isn't present.");
         }
-        if (gaming.Luid == downloads.Luid)
+        if (primary.Luid == secondary.Luid)
         {
-            return Off("Gaming and Downloads are the same connection.");
-        }
-
-        // Only a Gaming app needs the split, and so only a Gaming app needs Downloads to be the
-        // default route. A paused or never-moved (local-hosting) Gaming app doesn't count.
-        var wantsSplit = plan.Applications.Any(a => a.Rule.Role == RoleId.Gaming && a.Action != EnforcementAction.None);
-        if (!wantsSplit)
-        {
-            return Off("No apps are assigned to Gaming, so NetRoute isn't changing Windows' routing.");
+            return Off("The primary and Downloads connections are the same.");
         }
 
         // From here the routing preference holds even while one side is briefly offline, so
         // an unplugged cable doesn't flip Windows' default connection back and forth.
-        var baseline = new RedirectPlan { ManageDefaultRoute = true, Split = false, Downloads = downloads, Gaming = gaming };
+        var baseline = new RedirectPlan { ManageDefaultRoute = true, Split = false, DefaultAdapter = primary, SplitAdapter = secondary };
 
-        if (downloads.State != AdapterState.Connected || downloads.Ipv4Address is null)
+        if (secondary.State != AdapterState.Connected || secondary.Ipv4Address is null)
         {
-            return baseline with { Reason = $"{downloads.Name} isn't connected." };
+            return baseline with { Reason = $"{secondary.Name} isn't connected." };
         }
-        if (gaming.State != AdapterState.Connected || gaming.Ipv4Address is null)
+        if (primary.State != AdapterState.Connected || primary.Ipv4Address is null)
         {
-            // Strict Gaming apps are held by their block filters meanwhile (§39).
-            return baseline with { Reason = $"{gaming.Name} isn't connected." };
+            // Strict apps are held by their block filters meanwhile (§39).
+            return baseline with { Reason = $"{primary.Name} isn't connected." };
         }
 
         var rules = plan.Applications
-            .Where(a => a.Rule.Role == RoleId.Gaming && a.Action == EnforcementAction.PinToAdapter)
+            .Where(a => a.Rule.Role == RoleId.Downloads && a.Action == EnforcementAction.PinToAdapter)
             .Select(a => a.Rule)
             .ToList();
 
         return rules.Count == 0
-            ? baseline with { Reason = "No Gaming app can be moved right now." }
+            ? baseline with { Reason = "No app is on Downloads, so everything uses the primary connection." }
             : baseline with { Split = true, SplitRules = rules };
     }
 

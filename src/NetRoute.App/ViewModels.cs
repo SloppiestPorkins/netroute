@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Windows.Data;
 using System.Windows;
 using System.Windows.Media;
@@ -307,9 +308,91 @@ public partial class MainViewModel : ObservableObject
             row.SetLive(live.GetValueOrDefault(row.Id));
         }
         LiveProblem = rates is { Available: false } ? rates.Problem : null;
+        SyncUnadded(status.Apps, rates);
     }
 
     [ObservableProperty] private string? _liveProblem;
+
+    /// <summary>Programs using the network right now that aren't in the user's list, busiest first.</summary>
+    public ObservableCollection<UnaddedApp> Unadded { get; } = [];
+
+    public bool HasUnadded => Unadded.Count > 0;
+
+    private readonly Dictionary<string, string> _friendlyNames = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Keeps the bottom section in step with the network. Windows' own processes are left out, and
+    /// anything idle is too: the section is for what the user might want to move, not a process list.
+    /// Rows are updated in place so the list doesn't flicker once a second.
+    /// </summary>
+    private void SyncUnadded(IReadOnlyList<AppStatusDto> apps, AppRatesDto? rates)
+    {
+        var busiest = rates is { Available: true } r
+            ? r.Rates
+                .Where(x => !string.IsNullOrEmpty(x.ExecutablePath))
+                .Where(x => !x.ExecutablePath!.StartsWith(@"C:\Windows\", StringComparison.OrdinalIgnoreCase))
+                .Where(x => !apps.Any(a => AppMatching.Covers(a.Rule.App, x.ExecutablePath, x.PackageFamilyName)))
+                .GroupBy(x => x.ExecutablePath!, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new { Path = g.Key, Down = g.Sum(x => x.DownBytesPerSecond), Up = g.Sum(x => x.UpBytesPerSecond) })
+                .Where(x => x.Down + x.Up >= 1)
+                .OrderByDescending(x => x.Down + x.Up)
+                .Take(6)
+                .ToList()
+            : [];
+
+        var changed = busiest.Count != Unadded.Count
+                      || busiest.Zip(Unadded).Any(p => !string.Equals(p.First.Path, p.Second.ExecutablePath, StringComparison.OrdinalIgnoreCase));
+        if (!changed)
+        {
+            for (var i = 0; i < busiest.Count; i++)
+            {
+                Unadded[i].Update(busiest[i].Down, busiest[i].Up);
+            }
+            return;
+        }
+
+        Unadded.Clear();
+        foreach (var x in busiest)
+        {
+            Unadded.Add(new UnaddedApp(x.Path, FriendlyName(x.Path), x.Down, x.Up));
+        }
+        OnPropertyChanged(nameof(HasUnadded));
+    }
+
+    private string FriendlyName(string path)
+    {
+        if (_friendlyNames.TryGetValue(path, out var known))
+        {
+            return known;
+        }
+        string name;
+        try
+        {
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+            name = string.IsNullOrWhiteSpace(info.FileDescription) ? Path.GetFileNameWithoutExtension(path) : info.FileDescription!;
+        }
+        catch (Exception)
+        {
+            name = Path.GetFileNameWithoutExtension(path);
+        }
+        _friendlyNames[path] = name;
+        return name;
+    }
+
+    /// <summary>Opens the add flow already on the destination step, for a program seen on the network.</summary>
+    [RelayCommand]
+    private async Task AddUnadded(UnaddedApp app)
+    {
+        var vm = new AddAppViewModel(this);
+        Overlay = vm;
+        await vm.LoadAsync();
+        vm.Preselect(new InstalledApp
+        {
+            Identity = AppIdentity.ForExecutable(app.ExecutablePath, string.Equals(app.Name, Path.GetFileNameWithoutExtension(app.ExecutablePath), StringComparison.OrdinalIgnoreCase) ? null : app.Name),
+            Category = AppCategory.Other,
+            InstallLocation = null
+        });
+    }
 
     private readonly Dictionary<string, Counter> _counters = new(StringComparer.OrdinalIgnoreCase);
 
@@ -821,6 +904,17 @@ public partial class MainViewModel : ObservableObject
     }
 }
 
+/// <summary>One program on the network that isn't in the user's list, with what it is using right now.</summary>
+public partial class UnaddedApp(string executablePath, string name, double down, double up) : ObservableObject
+{
+    public string ExecutablePath { get; } = executablePath;
+    public string Name { get; } = name;
+
+    [ObservableProperty] private string _rateText = $"↓ {Format.Rate(down)}   ↑ {Format.Rate(up)}";
+
+    public void Update(double down, double up) => RateText = $"↓ {Format.Rate(down)}   ↑ {Format.Rate(up)}";
+}
+
 /// <summary>One of the two network cards (§8).</summary>
 public partial class RoleCardViewModel(RoleId role) : ObservableObject
 {
@@ -1242,6 +1336,13 @@ public partial class AddAppViewModel(MainViewModel main) : ObservableObject
         Step = 2;
     }
 
+    /// <summary>Goes straight to the destination step for a program already chosen elsewhere (the bottom section).</summary>
+    public void Preselect(InstalledApp app)
+    {
+        Selected = new AppChoice(app);
+        Next();
+    }
+
     [RelayCommand]
     private void Back() => Step = 1;
 
@@ -1310,18 +1411,17 @@ public partial class ChangeNetworkViewModel : ObservableObject
     private async Task Choose(DestinationChoice destination)
     {
         _main.Overlay = null;
-        if (destination.Role == _app.Rule.Role)
+        var mode = destination.Role == RoleId.Default ? RoutingMode.Default
+            // While Settings decides this for every app, the app keeps its own mode, so turning Settings
+            // off later does not leave it behind as Preferred.
+            : SettingsFallBack ? _app.Rule.Mode : FallBackWhenDown ? RoutingMode.Preferred : RoutingMode.Strict;
+        // Same destination with the same mode: nothing to save. A mode change on the same
+        // destination (e.g. Downloads, Default -> Strict) must still be written.
+        if (destination.Role == _app.Rule.Role && mode == _app.Rule.Mode)
         {
             return;
         }
-        var updated = _app.Rule with
-        {
-            Role = destination.Role,
-            Mode = destination.Role == RoleId.Default ? RoutingMode.Default
-                // While Settings decides this for every app, the app keeps its own mode, so turning Settings
-                // off later does not leave it behind as Preferred.
-                : SettingsFallBack ? _app.Rule.Mode : FallBackWhenDown ? RoutingMode.Preferred : RoutingMode.Strict,
-        };
+        var updated = _app.Rule with { Role = destination.Role, Mode = mode };
         await _main.Run(() => _main.Client.UpdateRuleAsync(updated), $"{_app.Rule.App.DisplayName} now uses {destination.Title}.");
     }
 }

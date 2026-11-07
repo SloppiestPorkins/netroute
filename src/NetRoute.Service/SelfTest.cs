@@ -32,7 +32,7 @@ public sealed record SelfTestInput(
 /// would read the same with enforcement dead. They are described as exactly that. Only step 3
 /// looks at NetRoute's effect, and only through what the traffic observer has already seen real
 /// Gaming apps doing. Proving NetRoute's own placement end to end needs a separate probe process
-/// under a real rule; that is what <c>NetRoute.Poc split</c> does, and it is not something a
+/// under a real rule (the old proof-of-concept tools did this; they are in git history), and it is not something a
 /// background service can honestly fake with its own sockets.</para>
 ///
 /// <para>It makes real internet requests (api.ipify.org to see each line's public address, and

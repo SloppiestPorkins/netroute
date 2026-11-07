@@ -21,6 +21,7 @@ public sealed class SystemDownloadsTests
         var config = new NetRouteConfig
         {
             SetupCompleted = true,
+            RouteSystemDownloads = true,
             RoleBindings = [Bind(RoleId.Gaming, NetRouteEngineTests.Ethernet()), Bind(RoleId.Downloads, NetRouteEngineTests.Wifi())]
         };
 

@@ -140,10 +140,17 @@ public sealed class NetRouteEngine : IDisposable
             var config = _store.Load();
             if (config.EnforcementPaused && config.PausedUntil is { } until && until <= DateTimeOffset.UtcNow)
             {
-                config = config with { EnforcementPaused = false, PausedUntil = null };
-                _store.Save(config);
-                AddEvent(ServiceEventKind.Resumed, "Protection is back on",
-                    "The pause ended, so NetRoute is keeping your apps on their networks again.");
+                // Through Update, so a rule edit made since the Load above is not overwritten.
+                try
+                {
+                    config = _store.Update(c => c with { EnforcementPaused = false, PausedUntil = null });
+                    AddEvent(ServiceEventKind.Resumed, "Protection is back on",
+                        "The pause ended, so NetRoute is keeping your apps on their networks again.");
+                }
+                catch (ConfigUnreadableException)
+                {
+                    // Nothing to resume: the file is unreadable and is running with no rules.
+                }
             }
             ReconcileLocked(config);
         }
@@ -318,8 +325,15 @@ public sealed class NetRouteEngine : IDisposable
         var held = await _gate.WaitAsync(TimeSpan.FromSeconds(1), ct);
         try
         {
-            var config = _store.Load() with { EnforcementPaused = true, PausedUntil = null };
-            _store.Save(config);
+            // Through Update, so the pause cannot overwrite a rule change made at the same moment.
+            try
+            {
+                _store.Update(c => c with { EnforcementPaused = true, PausedUntil = null });
+            }
+            catch (ConfigUnreadableException)
+            {
+                // An unreadable file runs with no rules anyway, so there is nothing to keep applied.
+            }
             _applied = null;
             _failedApplies = 0;
             _redirectSummary = "Off. Emergency Disable restored normal Windows networking.";
@@ -559,8 +573,15 @@ public sealed class NetRouteEngine : IDisposable
         await _gate.WaitAsync(ct);
         try
         {
-            var config = mutation(_store.Load());
-            _store.Save(config);
+            NetRouteConfig config;
+            try
+            {
+                config = _store.Update(mutation);
+            }
+            catch (ConfigUnreadableException ex)
+            {
+                throw Friendly(ex.Message);
+            }
             ReconcileLocked(config);
         }
         finally { _gate.Release(); }
@@ -709,7 +730,8 @@ public sealed class NetRouteEngine : IDisposable
                     // Only Strict rules are held. Preferred ones deliberately fall back to Windows
                     // routing, so counting all of them as blocked would overstate what happened.
                     var strict = config.AppRules.Count(r => r.Role == role && r.Mode == RoutingMode.Strict && !r.Paused);
-                    var fallsBack = config.AppRules.Count(r => r.Role == role && r.Mode != RoutingMode.Strict && !r.Paused);
+                    // Default-mode rules are not routed at all, so they fall back to nothing.
+                    var fallsBack = config.AppRules.Count(r => r.Role == role && r.Mode == RoutingMode.Preferred && !r.Paused);
                     var detail = (strict, fallsBack) switch
                     {
                         (0, 0) => "No apps are assigned to it.",

@@ -91,10 +91,21 @@ public sealed class PolicyResolver
             return Plan(rule, EnforcementAction.None, null, false, reasons);
         }
 
-        if (rule.Role == RoleId.Default || rule.Mode == RoutingMode.Default)
+        if (rule.Role == RoleId.Default)
         {
             reasons.Add(Reason.Ok($"{rule.App.DisplayName} is set to Default, so Windows routing applies."));
             reasons.Add(Reason.Ok("NetRoute is deliberately not interfering."));
+            return Plan(rule, EnforcementAction.None, null, false, reasons);
+        }
+
+        // A named role with Default mode is not routed. Say so, rather than letting the app look
+        // assigned to a connection it is not actually held to.
+        if (rule.Mode == RoutingMode.Default)
+        {
+            reasons.Add(Reason.Bad(
+                $"{rule.App.DisplayName} is assigned to {rule.Role.DisplayName()} but its mode is Default, " +
+                "so NetRoute is not holding it to that connection."));
+            reasons.Add(Reason.Ok("Set its mode to Strict or Preferred to route it."));
             return Plan(rule, EnforcementAction.None, null, false, reasons);
         }
 

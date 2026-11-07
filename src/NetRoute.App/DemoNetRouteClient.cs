@@ -127,7 +127,7 @@ public sealed class DemoNetRouteClient : INetRouteClient
                 : new SystemDownloadsDto(false, false, "Off. Windows Update, Microsoft Store and Xbox app downloads use whichever connection Windows picks."),
             DownloadsPause = new DownloadsPauseDto(_pauseDownloads, null, _quietHours),
             RedirectionAvailable = true,
-            RedirectSummary = $"On. {_rules.Count(r => r.Role == RoleId.Gaming)} Gaming apps are moved onto Ethernet; Wi-Fi 2 is Windows' default connection.",
+            RedirectSummary = $"On. {_rules.Count(r => r.Role == RoleId.Downloads)} Downloads apps are moved onto Wi-Fi 2; Ethernet is Windows' default connection.",
             Roles = [Role(RoleId.Gaming, _adapters[0], 12, 0), Role(RoleId.Downloads, _adapters[1], 21, 0.4)],
             Apps = apps,
             RecentLeaks = [],
@@ -318,7 +318,8 @@ public sealed class DemoNetRouteClient : INetRouteClient
             // Assigned to Gaming (Ethernet) but moving data on Wi-Fi 2, and its servers ignore ping.
             Rate("ForzaHorizon5", 8120, "Wi-Fi 2", 0.31, 55, @"G:\SteamLibrary\steamapps\common\ForzaHorizon5\ForzaHorizon5.exe", kind: LatencyKind.NotMeasurable),
             Rate("OneDrive", 3300, "Ethernet", 2.6, 90, @"C:\Program Files\Microsoft OneDrive\OneDrive.exe"),
-            Rate("brave", 9001, "Wi-Fi 2", 0.4, 20)
+            Rate("brave", 9001, "Wi-Fi 2", 0.4, 20),
+            Rate("Spotify", 6402, "Ethernet", 0.9, 14, @"C:\Users\Jack\AppData\Roaming\Spotify\Spotify.exe")
         ]));
     }
 

@@ -12,21 +12,20 @@ public class RedirectPlannerTests
     private const ulong EthernetLuid = 1, WifiLuid = 2;
 
     /// <summary>
-    /// The inverted mapping is the whole point. Gaming apps are split and moved onto Gaming,
-    /// and Downloads becomes the default route. Launchers are NOT split: if they were, the
-    /// games they start would inherit the split and follow them onto Downloads (§36/§37).
+    /// Ethernet (primary) is the default route, so everything unassigned stays there. Only the apps
+    /// assigned to Downloads are moved onto Wi-Fi. Gaming (primary) apps are not in the split.
     /// </summary>
     [Fact]
-    public void SplitsOnlyGamingAppsAndMakesDownloadsTheDefault()
+    public void SplitsOnlyDownloadsAppsAndMakesThePrimaryLineTheDefault()
     {
         var (config, plan, adapters) = Scenario();
         var redirect = RedirectPlanner.Build(config, plan, adapters);
 
         Assert.True(redirect.ManageDefaultRoute);
         Assert.True(redirect.Split);
-        Assert.Equal(WifiLuid, redirect.Downloads!.Luid);
-        Assert.Equal(EthernetLuid, redirect.Gaming!.Luid);
-        Assert.Equal("Halo Infinite", Assert.Single(redirect.SplitRules).App.DisplayName);
+        Assert.Equal(EthernetLuid, redirect.DefaultAdapter!.Luid);
+        Assert.Equal(WifiLuid, redirect.SplitAdapter!.Luid);
+        Assert.Equal("Steam", Assert.Single(redirect.SplitRules).App.DisplayName);
     }
 
     [Fact]
@@ -63,19 +62,20 @@ public class RedirectPlannerTests
     }
 
     /// <summary>
-    /// Changed from the old behaviour, which asserted ManageDefaultRoute with no Gaming app at all.
-    /// That rewrote Windows' metrics for a user who had asked NetRoute to do nothing to them.
+    /// With no Downloads app there is nothing to split, but the primary line stays the default route,
+    /// so an unassigned app can't drift onto Wi-Fi.
     /// </summary>
     [Fact]
-    public void NoGamingAppsMeansNothingToSplitAndWindowsRoutingIsLeftAlone()
+    public void NoDownloadsAppsMeansNoSplitButThePrimaryLineStaysTheDefault()
     {
         var (config, _, adapters) = Scenario();
-        config = config with { AppRules = config.AppRules.Where(r => r.Role != RoleId.Gaming).ToList() };
+        config = config with { AppRules = config.AppRules.Where(r => r.Role != RoleId.Downloads).ToList() };
         var plan = new PolicyResolver(new Fake(adapters)).Resolve(config);
 
         var redirect = RedirectPlanner.Build(config, plan, adapters);
-        Assert.False(redirect.ManageDefaultRoute);
+        Assert.True(redirect.ManageDefaultRoute);
         Assert.False(redirect.Split);
+        Assert.Equal(EthernetLuid, redirect.DefaultAdapter!.Luid);
     }
 
     [Fact]

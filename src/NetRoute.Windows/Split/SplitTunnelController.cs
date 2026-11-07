@@ -50,7 +50,7 @@ public sealed class SplitTunnelController : IDisposable
         {
             if (plan.ManageDefaultRoute)
             {
-                routeNote = _routes.EnsurePreferred(plan.Downloads!, plan.Gaming!);
+                routeNote = _routes.EnsurePreferred(plan.DefaultAdapter!, plan.SplitAdapter!);
             }
             else
             {
@@ -84,7 +84,7 @@ public sealed class SplitTunnelController : IDisposable
             if (images.Count == 0)
             {
                 Disengage();
-                outcome = new(false, 0, routeNote, "NetRoute couldn't find the program files of your Gaming apps.");
+                outcome = new(false, 0, routeNote, "NetRoute couldn't find the program files of your Downloads apps.");
             }
             else
             {
@@ -97,10 +97,10 @@ public sealed class SplitTunnelController : IDisposable
                         _initialized = true;
                     }
 
-                    // Tunnel = kept off (Downloads, the default route); internet = moved onto (Gaming).
+                    // Tunnel = kept off (the default route, primary); internet = moved onto (Downloads).
                     _driver!.RegisterIpAddresses(
-                        plan.Downloads!.Ipv4Address, plan.Gaming!.Ipv4Address,
-                        plan.Downloads.Ipv6Address, plan.Gaming.Ipv6Address);
+                        plan.DefaultAdapter!.Ipv4Address, plan.SplitAdapter!.Ipv4Address,
+                        plan.DefaultAdapter.Ipv6Address, plan.SplitAdapter.Ipv6Address);
                     _driver.SetConfiguration(images);
 
                     var engaged = _driver.GetState() == SplitTunnelState.Engaged;

@@ -109,12 +109,12 @@ public class HonestStatusTests
     // ---- Default ----
 
     [Fact]
-    public void Default_says_downloads_while_a_gaming_app_exists()
-        => Assert.Equal("Downloads line, unless you add it", StatusWording.DefaultSubtitle(Status(App(VerificationState.Verified))));
+    public void Default_says_primary_connection_while_a_gaming_app_exists()
+        => Assert.Equal("Primary connection, unless you add it to Downloads", StatusWording.DefaultSubtitle(Status(App(VerificationState.Verified))));
 
     [Fact]
-    public void Default_says_windows_decides_when_nothing_is_on_gaming()
-        => Assert.Equal("Windows decides", StatusWording.DefaultSubtitle(Status()));
+    public void Default_says_primary_connection_when_nothing_is_on_gaming()
+        => Assert.Equal("Primary connection, unless you add it to Downloads", StatusWording.DefaultSubtitle(Status()));
 
     [Fact]
     public void Default_says_windows_decides_while_paused()

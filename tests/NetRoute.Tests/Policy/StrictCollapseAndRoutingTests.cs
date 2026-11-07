@@ -86,20 +86,21 @@ public class StrictCollapseAndRoutingTests
     // ---- the default route (finding 12) ----
 
     [Fact]
-    public void The_default_route_is_left_alone_until_an_app_is_assigned_to_gaming()
+    public void The_primary_line_is_the_default_route_and_a_downloads_app_is_split_off_it()
     {
         var config = Config(RoleId.Downloads, RoutingMode.Strict);   // Downloads rules only
         var adapters = new[] { Ethernet(), Wifi() };
 
         var redirect = RedirectPlanner.Build(config, new PolicyResolver(new Fake(adapters)).Resolve(config), adapters);
 
-        Assert.False(redirect.ManageDefaultRoute);
-        Assert.False(redirect.Split);
-        Assert.Contains("No apps are assigned to Gaming", redirect.Reason);
+        Assert.True(redirect.ManageDefaultRoute);
+        Assert.True(redirect.Split);
+        Assert.Equal(EthernetLuid, redirect.DefaultAdapter!.Luid);
+        Assert.Equal(WifiLuid, redirect.SplitAdapter!.Luid);
     }
 
     [Fact]
-    public void A_paused_gaming_app_does_not_move_the_default_route()
+    public void A_paused_gaming_app_keeps_the_primary_line_as_the_default_route()
     {
         var config = Config(RoleId.Gaming, RoutingMode.Strict);
         config = config with { AppRules = config.AppRules.Select(r => r with { Paused = true }).ToList() };
@@ -107,11 +108,12 @@ public class StrictCollapseAndRoutingTests
 
         var redirect = RedirectPlanner.Build(config, new PolicyResolver(new Fake(adapters)).Resolve(config), adapters);
 
-        Assert.False(redirect.ManageDefaultRoute);
+        Assert.True(redirect.ManageDefaultRoute);
+        Assert.False(redirect.Split);
     }
 
     [Fact]
-    public void A_gaming_app_makes_downloads_the_default_route()
+    public void A_gaming_app_keeps_the_primary_line_as_the_default_route()
     {
         var config = Config(RoleId.Gaming, RoutingMode.Strict);
         var adapters = new[] { Ethernet(), Wifi() };
@@ -119,7 +121,7 @@ public class StrictCollapseAndRoutingTests
         var redirect = RedirectPlanner.Build(config, new PolicyResolver(new Fake(adapters)).Resolve(config), adapters);
 
         Assert.True(redirect.ManageDefaultRoute);
-        Assert.Equal(WifiLuid, redirect.Downloads!.Luid);
+        Assert.Equal(EthernetLuid, redirect.DefaultAdapter!.Luid);
     }
 
     [Fact]

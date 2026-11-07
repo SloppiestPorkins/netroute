@@ -671,7 +671,7 @@
                     <DockPanel>
                         <TextBlock Style="{StaticResource Icon}" Text="&#xE946;" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Top" Margin="0,2,10,0" />
                         <TextBlock Style="{StaticResource Caption}" FontSize="13" TextWrapping="Wrap" LineHeight="19"
-                                   Text="Once you put a game on Gaming, your Download network becomes Windows' default connection. That means Steam, browsers and updates use it without being told, and so does everything you haven't listed, such as Discord voice or a new browser. Games on Gaming are moved onto the Gaming network, together with anything they start." />
+                                   Text="Your Gaming network is the main connection. Everything you haven't put on Downloads uses it without being told: games, Steam, browsers, Discord and updates. Apps you add to Downloads go over the other connection, and anything they start goes with them." />
                     </DockPanel>
                 </Border>
                 <Button Content="Finish" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left" Margin="0,22,0,0" MinWidth="130"
@@ -686,6 +686,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
             <!-- Header. A Grid with a wrapping toolbar, not a DockPanel: a horizontal StackPanel
@@ -895,6 +896,7 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <Border Width="30" Height="30" CornerRadius="8" Background="{StaticResource NeutralTintBrush}">
                                             <TextBlock Style="{StaticResource Icon}" Text="{Binding Glyph}" FontSize="14"
@@ -902,13 +904,16 @@
                                         </Border>
                                         <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                                                    VerticalAlignment="Center" Margin="12,0" />
-                                        <Border Grid.Column="2" Style="{StaticResource Pill}" Background="{Binding StatusTint}" MinWidth="96" Margin="0,0,8,0">
+                                        <!-- What the app is using right now. Empty when idle, so the column stays the same width. -->
+                                        <TextBlock Grid.Column="2" Text="{Binding RateText}" Foreground="{Binding RateBrush}" FontSize="13"
+                                                   VerticalAlignment="Center" TextAlignment="Right" MinWidth="168" Margin="0,0,12,0" />
+                                        <Border Grid.Column="3" Style="{StaticResource Pill}" Background="{Binding StatusTint}" MinWidth="96" Margin="0,0,8,0">
                                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                                                 <Ellipse Width="7" Height="7" Fill="{Binding StatusBrush}" VerticalAlignment="Center" />
                                                 <TextBlock Text="{Binding StatusText}" FontSize="13" FontWeight="SemiBold" Margin="6,0,0,0" />
                                             </StackPanel>
                                         </Border>
-                                        <Button Grid.Column="3" Style="{StaticResource IconButton}" ToolTip="App settings"
+                                        <Button Grid.Column="4" Style="{StaticResource IconButton}" ToolTip="App settings"
                                                 Command="{Binding DataContext.OpenAppCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                 CommandParameter="{Binding}">
                                             <TextBlock Style="{StaticResource Icon}" Text="&#xE713;" />
@@ -927,6 +932,40 @@
                                Text="Add a game to keep it on your Gaming network, and Steam to keep its downloads off it." />
                 </StackPanel>
             </Grid>
+
+            <!-- Programs using the network now that aren't in your list. Busiest first, so you can see what
+                 to move onto Downloads without going looking for it. -->
+            <Border Grid.Row="4" Style="{StaticResource Card}" Padding="14,12" Margin="0,14,0,0" MaxHeight="260"
+                    Visibility="{Binding HasUnadded, Converter={StaticResource BoolVisibility}}">
+                <StackPanel>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="Show all traffic" Command="{Binding OpenLiveCommand}" />
+                        <TextBlock Text="NOT ADDED YET  ·  USING THE NETWORK NOW" Style="{StaticResource Section}" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <ItemsControl ItemsSource="{Binding Unadded}" Margin="0,8,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,4,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" ToolTip="{Binding ExecutablePath}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding RateText}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,12,0" />
+                                    <Button Grid.Column="2" Content="Add" Style="{StaticResource GhostButton}"
+                                            Command="{Binding DataContext.AddUnaddedCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <DockPanel Margin="0,10,0,0">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="Browse all apps" Command="{Binding AddAppCommand}" />
+                        <TextBlock Text="Idle programs aren't listed. Browse finds them." Style="{StaticResource Caption}" VerticalAlignment="Center" />
+                    </DockPanel>
+                </StackPanel>
+            </Border>
         </Grid>
 
         <!-- Overlay -->

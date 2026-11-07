@@ -121,8 +121,8 @@ public sealed class WfpEnforcementBackend : IEnforcementBackend
             if (outcome.Engaged)
             {
                 var route = outcome.RouteNote is { } note && note.Contains("still", StringComparison.Ordinal) ? $" Warning: {note}" : string.Empty;
-                return $"On. {outcome.SplitImages} Gaming program file(s) are moved onto {plan.Gaming!.Name}; " +
-                       $"{plan.Downloads!.Name} is Windows' default connection.{route}";
+                return $"On. {outcome.SplitImages} Downloads program file(s) are moved onto {plan.SplitAdapter!.Name}; " +
+                       $"{plan.DefaultAdapter!.Name} is Windows' default connection.{route}";
             }
             return $"Off. {outcome.Problem ?? plan.Reason ?? "Nothing to move."}";
         }

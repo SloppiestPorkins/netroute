@@ -33,10 +33,11 @@ public sealed record NetRouteConfig
     public DateTimeOffset? PausedUntil { get; init; }
 
     /// <summary>
-    /// Keep Windows' own download services (Windows Update, Store, Xbox app) on the Downloads
-    /// network too. They aren't apps a user can pick, so this is a switch rather than a rule.
+    /// Send Windows' own download services (Windows Update, Store, Xbox app) over the Downloads
+    /// network. They aren't apps a user can pick, so this is a switch rather than a rule. Off by
+    /// default: everything goes out the primary connection unless you choose otherwise.
     /// </summary>
-    public bool RouteSystemDownloads { get; init; } = true;
+    public bool RouteSystemDownloads { get; init; } = false;
 
     /// <summary>
     /// When a connection goes down, send the apps that were assigned to it over the other one
@@ -61,6 +62,9 @@ public sealed record NetRouteConfig
     /// NetRoute's own repository, which is where its releases are. Clear it and NetRoute never
     /// calls anywhere; point it somewhere else and it looks there instead.
     /// </summary>
+    // Never omitted when null: a missing key reloads as the default feed, so a cleared
+    // address would quietly come back and NetRoute would start calling it again.
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? UpdateFeedUrl { get; init; } = Updates.Feed;
 
     /// <summary>
@@ -101,36 +105,38 @@ public sealed class ConfigStore
 
     public string FilePath => _path;
 
+    /// <summary>
+    /// True when the last <see cref="Load"/> found a file it could not parse. Its contents were
+    /// copied to <c>config.json.corrupt</c>, and <see cref="Update"/> refuses to write over it.
+    /// </summary>
+    public bool IsCorrupt { get; private set; }
+
     public NetRouteConfig Load()
     {
         lock (_gate)
         {
-            if (!File.Exists(_path))
+            return LoadUnlocked();
+        }
+    }
+
+    /// <summary>
+    /// Load, change and save as one step under the store's lock, so two writers cannot each
+    /// read the same config and lose the other's change. Refuses to run when the file on disk
+    /// could not be read: writing then would replace the user's rules with an empty config.
+    /// </summary>
+    public NetRouteConfig Update(Func<NetRouteConfig, NetRouteConfig> mutation)
+    {
+        lock (_gate)
+        {
+            var current = LoadUnlocked();
+            if (IsCorrupt)
             {
-                return new NetRouteConfig();
+                throw new ConfigUnreadableException(_path);
             }
 
-            try
-            {
-                var json = File.ReadAllText(_path);
-                return JsonSerializer.Deserialize<NetRouteConfig>(json, SerializerOptions) ?? new NetRouteConfig();
-            }
-            catch (JsonException)
-            {
-                // A corrupt config must not take enforcement down with it. Preserve the
-                // bad file for diagnosis and start clean rather than crash-looping the
-                // service, which would leave the user with no enforcement and no UI.
-                var quarantine = _path + ".corrupt";
-                try
-                {
-                    File.Copy(_path, quarantine, overwrite: true);
-                }
-                catch (IOException)
-                {
-                    // Best effort only.
-                }
-                return new NetRouteConfig();
-            }
+            var next = mutation(current);
+            SaveUnlocked(next);
+            return next;
         }
     }
 
@@ -138,12 +144,59 @@ public sealed class ConfigStore
     {
         lock (_gate)
         {
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
-
-            // Write-then-replace so a crash mid-save cannot truncate the live config.
-            var temp = _path + ".tmp";
-            File.WriteAllText(temp, JsonSerializer.Serialize(config, SerializerOptions));
-            File.Move(temp, _path, overwrite: true);
+            SaveUnlocked(config);
         }
+    }
+
+    private NetRouteConfig LoadUnlocked()
+    {
+        IsCorrupt = false;
+        if (!File.Exists(_path))
+        {
+            return new NetRouteConfig();
+        }
+
+        try
+        {
+            var json = File.ReadAllText(_path);
+            return JsonSerializer.Deserialize<NetRouteConfig>(json, SerializerOptions) ?? new NetRouteConfig();
+        }
+        catch (JsonException)
+        {
+            // A corrupt config must not take enforcement down with it. Preserve the bad file for
+            // diagnosis, run with no rules rather than crash-looping the service, and remember that
+            // the file is unreadable so nothing overwrites it with an empty config.
+            IsCorrupt = true;
+            var quarantine = _path + ".corrupt";
+            try
+            {
+                File.Copy(_path, quarantine, overwrite: true);
+            }
+            catch (IOException)
+            {
+                // Best effort only.
+            }
+            return new NetRouteConfig();
+        }
+    }
+
+    private void SaveUnlocked(NetRouteConfig config)
+    {
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_path)!);
+
+        // Write-then-replace so a crash mid-save cannot truncate the live config.
+        var temp = _path + ".tmp";
+        File.WriteAllText(temp, JsonSerializer.Serialize(config, SerializerOptions));
+        File.Move(temp, _path, overwrite: true);
+    }
+}
+
+/// <summary>The config file exists but cannot be read, so it was left untouched.</summary>
+public sealed class ConfigUnreadableException : Exception
+{
+    public ConfigUnreadableException(string path)
+        : base($"NetRoute's settings file could not be read, so nothing was changed. " +
+               $"A copy of it is at {path}.corrupt.")
+    {
     }
 }

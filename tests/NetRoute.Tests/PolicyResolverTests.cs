@@ -55,6 +55,24 @@ public class PolicyResolverTests
         Assert.Equal(WifiLuid, Find(after, "Steam").ResolvedAdapter!.Luid);
     }
 
+    /// <summary>
+    /// A named role with Default mode is not routed. It used to be reported as "set to Default,
+    /// Windows routing applies" while the UI showed the role, so the app looked held to a
+    /// connection it was not held to. It must now say so, and apply nothing.
+    /// </summary>
+    [Fact]
+    public void NamedRoleWithDefaultModeIsReportedAsNotRouted()
+    {
+        var config = SingleApp(RoleId.Downloads, WifiLuid, RoutingMode.Default);
+
+        var plan = Resolve(config, Ethernet(), Wifi());
+        var app = Find(plan, "Halo Infinite");
+
+        Assert.Equal(EnforcementAction.None, app.Action);
+        Assert.Contains(app.Reasons, r => !r.Good && r.Text.Contains("not holding it"));
+        Assert.DoesNotContain(app.Reasons, r => r.Text.Contains("Windows routing applies"));
+    }
+
     /// <summary>§15, §18, §39: a downed strict role blocks rather than falling back.</summary>
     [Fact]
     public void StrictRuleBlocksWhenAdapterGoesOffline()

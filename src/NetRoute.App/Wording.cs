@@ -112,22 +112,21 @@ public static class StatusWording
             : ("Rules applied, no traffic seen yet", Tone.Muted);
     }
 
-    /// <summary>True while NetRoute is making Downloads the Windows default route (mirrors RedirectPlanner).</summary>
+    /// <summary>True while NetRoute is making the primary connection the Windows default route (mirrors RedirectPlanner).</summary>
     public static bool ManagesDefaultRoute(ServiceStatusDto? status)
     {
         if (status is not { SetupCompleted: true, EnforcementPaused: false })
         {
             return false;
         }
-        var gaming = status.Roles.FirstOrDefault(r => r.Role == RoleId.Gaming)?.Adapter;
+        var primary = status.Roles.FirstOrDefault(r => r.Role == RoleId.Gaming)?.Adapter;
         var downloads = status.Roles.FirstOrDefault(r => r.Role == RoleId.Downloads)?.Adapter;
-        return gaming is not null && downloads is not null && gaming.Luid != downloads.Luid
-               && status.Apps.Any(a => a.Rule.Role == RoleId.Gaming && a.Action != EnforcementAction.None);
+        return primary is not null && downloads is not null && primary.Luid != downloads.Luid;
     }
 
     /// <summary>The line under "Default" in the destination picker. It says what actually happens to such an app.</summary>
     public static string DefaultSubtitle(ServiceStatusDto? status)
-        => ManagesDefaultRoute(status) ? "Downloads line, unless you add it" : "Windows decides";
+        => ManagesDefaultRoute(status) ? "Primary connection, unless you add it to Downloads" : "Windows decides";
 
     /// <summary>The note on a role card whose connection is down.</summary>
     public static string RoleOfflineNote(RoleId role, int assigned)
